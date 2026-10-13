@@ -4,6 +4,8 @@
 
 Windows 微信内嵌、多账号、实时回复建议，以及 ExportWeChat HTML / 本地聊天记录的历史分析任务方案，见 [详细方案](docs/windows/WINDOWS_WECHAT_PRODUCT_PLAN.md)。其他智能体请先读 [AGENTS.md](AGENTS.md) 和 [交接说明](docs/windows/AGENT_HANDOFF.md)。该方向目前处于设计阶段，尚未完成 Windows 原型验证或实现。
 
+已补充 [微信嵌入测试结果](docs/windows/WECHAT_EMBED_TEST_RESULTS_2026-10-14.md) 和 [测试原型源码](windows/probes/wechat-embed/README.md)。目前只完成部分验证，已发现单击会话和滚动异常，不能视为可用的 Windows 产品。
+
 **装在手机上的「对话副驾」：你在任何聊天 App 里聊天，它在旁边读懂对方、告诉你该怎么回，一键填进输入框，发不发由你。**
 
 已在 **微信、QQ、X（Twitter 私信）** 三个平台真机跑通，飞书采集已接入。一套内核，一个 App 一个几十行的适配器。

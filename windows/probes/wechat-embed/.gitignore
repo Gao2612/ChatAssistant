@@ -1,0 +1,6 @@
+*.exe
+*.pdb
+status.txt
+selftest.txt
+geometry-v2.txt
+wechat-path.txt
