@@ -2,6 +2,10 @@
 
 ## Windows 产品方案与 Agent 入口
 
+Windows 版已整理 [crush 源码参考包](windows/reference/crush-monitor/README.md)：
+桌面壳、导入、增量分析、模型连接、本地保存与报告的完整源码及来源清单。
+工程入口见 [windows/README.md](windows/README.md)。当前为可迁入基础，尚未接通正式产品。
+
 Windows 微信内嵌、多账号、实时回复建议，以及 ExportWeChat HTML / 本地聊天记录的历史分析任务方案，见 [详细方案](docs/windows/WINDOWS_WECHAT_PRODUCT_PLAN.md)。其他智能体请先读 [AGENTS.md](AGENTS.md) 和 [交接说明](docs/windows/AGENT_HANDOFF.md)。该方向目前处于设计阶段，尚未完成 Windows 原型验证或实现。
 
 已补充 [微信嵌入测试结果](docs/windows/WECHAT_EMBED_TEST_RESULTS_2026-10-14.md) 和 [测试原型源码](windows/probes/wechat-embed/README.md)。目前只完成部分验证，已发现单击会话和滚动异常，不能视为可用的 Windows 产品。

@@ -1,9 +1,14 @@
 # Windows 微信一体化聊天助手与历史分析方案
 
-更新日期：2026-10-14（Asia/Shanghai）
+更新日期：2026-10-16（Asia/Shanghai）
 状态：需求与架构提案；用户已授权编写并上传方案，尚未实施或验证 Windows 原型。
 后续进展（2026-10-14）：临时窗口嵌入探针已部分实测，出现单击/滚动兼容性问题。本文原始调研状态保留，最新证据以 [实机测试报告](WECHAT_EMBED_TEST_RESULTS_2026-10-14.md) 为准；正式产品仍未实现。
 需求来源：本次用户沟通。本文是 Windows 方向的统一需求入口。
+
+当前工程基础：[crush 源码参考包](../../windows/reference/crush-monitor/README.md)
+已写入本仓库，包含桌面壳、导入、分析、保存、报告及原有测试。
+这是本地增强工作区的来源快照，尚未接通正式 Windows 产品。
+窗口嵌入探针因白屏和恢复故障暂停，历史导入与分析可以独立推进。
 关键词：Windows、微信多开、嵌入微信、实时分析、回复建议、ExportWeChat、HTML 导入、客户画像、关系趋势、聊天统计、本地记录、exe 安装包。
 
 ## 1. 已确认的产品目标
@@ -26,6 +31,10 @@ Gao2612/ChatAssistant 当前为 Android Kotlin + View/XML 工程：
 - README 描述无障碍读屏、OCR 兜底、模型判断与回复建议；桌面版不是本工程已实现的功能。
 
 因此不能通过简单更换打包器生成原生 Windows 版本。
+Windows 桌面壳和历史分析改以 crush 的 Electron/TypeScript 源码为开发基础。
+原有 Android 代码提供实时流程和采集适配器的设计参考。
+参考包保留上游 MIT 许可、基础提交及每个文件的哈希和本地改动状态。
+它仍使用 crush 的应用身份、配置路径和两人分析模型，迁入时需要明确适配。
 README 链接的 Windows 姊妹项目 https://github.com/jev-chat/jev-chat-windows 值得作为参考或复用基础：
 - Python + PySide6 UI，Windows Graphics Capture + RapidOCR 本地采集。
 - main.py 管理采集子进程、模型调用和会话上下文。
@@ -77,8 +86,11 @@ README 链接的 Windows 姊妹项目 https://github.com/jev-chat/jev-chat-windo
 
 ## 4. 推荐技术路线与模块
 
-推荐先使用 Python + PySide6 + Win32 实现验证版本，复用 Windows 项目的采集和分析思路。
-正式界面可使用标准 Qt 控件或确认授权后的组件，避免直接照搬未经核对的发布依赖。
+推荐以 Electron + React + TypeScript 建立桌面壳、历史任务和模型接口，
+复用本仓库已整理的 crush 源码与验证基准。
+Windows 原生窗口、WGC 与 OCR 能力通过独立连接器接入；
+是否需要 Python 或其它原生进程由采集验证结果决定，不预先要求改写分析模块。
+crush 便携打包只作为构建基础，正式产品仍需安装、升级与卸载设计。
 推荐新增独立 windows/ 工程，保留现有 Android app/ 构建，不在 Android 源码中硬塞桌面逻辑。
 
 模块：
@@ -240,7 +252,8 @@ HTML 样本按人工标注核对条数、顺序、方向、日期和附件映射
 
 windows/
   README.md
-  pyproject.toml
+  reference/
+    crush-monitor/ 已整理的增强版源码、来源清单、MIT 与迁入说明
   desktop/       界面与窗口托管
   capture/       WGC/OCR/路由
   importers/     ExportWeChat 解析器与字段映射
@@ -248,11 +261,13 @@ windows/
   analysis/      实时与历史分析、模型网关
   tasks/         持久化任务执行
   reports/       统计与报告生成
-  packaging/     PyInstaller 与安装器
+  packaging/     Electron 打包与安装器
   tests/         脱敏夹具、解析/隔离/任务/安全测试
 docs/windows/    产品与实施交接文档
 
-这是推荐结构，尚未创建代码或选定全部依赖。后续实现者先完成 P0，再确定正式代码结构。
+reference/ 已创建，其余是待实施的正式模块建议结构。
+参考源码保留原有目录和依赖，不能将快照目录误认成已完成产品。
+迁入先完成独立应用身份和数据目录，再建立账号、会话与消息来源模型。
 
 ## 12. 待确认项与下一步
 
@@ -261,7 +276,8 @@ docs/windows/    产品与实施交接文档
 后续产品选择：后台账号是否需要同时采集、首版报告导出格式、实时记录默认保存策略、模型费用与接口。
 这些事项未影响当前方案编写，但不得凭空认定已有支持。
 
-下一步先开展 P0 的明确验证，再按本方案形成可执行实施计划；本文不是已经验证的实现承诺。
+下一步按源码参考包中的迁入顺序推进正式桌面基础、导入和历史任务。
+窗口嵌入 P0 暂停，恢复实机验证应另行安排；本文不是已经验证的实现承诺。
 任何 agent 不应自动读取用户真实聊天文件、启动账号或把真实消息发给模型来完成文档阅读。
 
 ## 13. Agent 交接要求
