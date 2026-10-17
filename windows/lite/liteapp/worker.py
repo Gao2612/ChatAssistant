@@ -35,7 +35,8 @@ def significant_visual_change(previous, current, threshold=0.002):
 
 def run(out, stop, hwnd, session, frame_clock, reading_backend="ocr"):
     import ctypes
-    from .discovery import WindowTarget, valid, minimized, dpi, popup_covering
+    from .discovery import (WindowTarget, valid, minimized, dpi, popup_covering,
+                            window_status)
     latest = [None]
     latest_seq = [0]
     last_clock_image = [None]
@@ -109,57 +110,120 @@ def run(out, stop, hwnd, session, frame_clock, reading_backend="ocr"):
             stop_capture()
             emit("closed", message="微信窗口身份已变化，请重新扫描后连接。")
             return
-        cap = WindowsCapture(cursor_capture=None, draw_border=None, window_hwnd=hwnd_value)
-        @cap.event
-        def on_frame_arrived(frame, control):
-            if closed.is_set():
+        wgc_gate = threading.Event()
+        ctl = None
+
+        def start_wgc():
+            nonlocal ctl
+            if ctl is not None:
                 return
-            image = np.ascontiguousarray(frame.frame_buffer[:, :, :3][:, :, ::-1])
-            with lock:
-                if closed.is_set():
+            cap = WindowsCapture(cursor_capture=None, draw_border=None,
+                                 window_hwnd=hwnd_value)
+
+            @cap.event
+            def on_frame_arrived(frame, control):
+                if closed.is_set() or not wgc_gate.is_set():
                     return
-                previous = last_clock_image[0]
-                if previous is None or significant_visual_change(previous, image):
-                    latest_seq[0] += 1
-                    last_clock_image[0] = image
-                    with frame_clock.get_lock():
-                        frame_clock[0] = latest_seq[0]
-                        frame_clock[1] = time.monotonic_ns()
-                latest[0] = image
-        @cap.event
-        def on_closed():
-            with lock:
-                closed.set()
-        ctl = cap.start_free_threaded()
+                image = np.ascontiguousarray(frame.frame_buffer[:, :, :3][:, :, ::-1])
+                with lock:
+                    if closed.is_set():
+                        return
+                    previous = last_clock_image[0]
+                    if previous is None or significant_visual_change(previous, image):
+                        latest_seq[0] += 1
+                        last_clock_image[0] = image
+                        with frame_clock.get_lock():
+                            frame_clock[0] = latest_seq[0]
+                            frame_clock[1] = time.monotonic_ns()
+                    latest[0] = image
+
+            @cap.event
+            def on_closed():
+                with lock:
+                    closed.set()
+
+            wgc_gate.set()
+            ctl = cap.start_free_threaded()
+
+        def stop_wgc():
+            nonlocal ctl
+            wgc_gate.clear()
+            current, ctl = ctl, None
+            if current is not None:
+                try:
+                    current.stop()
+                except Exception:
+                    pass
+
+        # WGC cannot attach to a tray-hidden window. Start it only while the window
+        # is visible; hidden windows go through the off-screen tray capture below
+        # and switch back to WGC after the user reopens WeChat.
+        if window_status(hwnd_value) == "visible":
+            try:
+                start_wgc()
+            except Exception:
+                stop_wgc()
         last_frame = None
+        last_hidden_capture = [0.0]
         identity_changed = False
         while not stop.wait(1.2) and not closed.is_set():
             if not valid(hwnd):
                 clear_target()
                 identity_changed = True
                 break
-            if minimized(hwnd):
-                emit("unavailable", state="minimized",
-                     message="微信已最小化，请手动还原微信后继续。")
-                last_frame = None
-                with lock:
-                    latest[0] = None
-                continue
+            hidden_now = window_status(hwnd_value) != "visible"
+            if hidden_now:
+                if ctl is not None:
+                    stop_wgc()
+            elif ctl is None:
+                try:
+                    start_wgc()
+                except Exception:
+                    stop_wgc()
+            if hidden_now:
+                # Window closed to tray / minimized: WeChat has no DWM surface while
+                # fully hidden. Capture it through a brief off-screen, non-activating
+                # show (tray_capture restores its position and hidden state), so the
+                # assistant keeps reading without stealing focus. Throttled because
+                # each capture briefly shows the window off-screen.
+                now = time.monotonic()
+                if now - last_hidden_capture[0] < 2.5:
+                    stop.wait(0.4)
+                    continue
+                last_hidden_capture[0] = now
+                from .tray_capture import capture_hidden_window
+                tray_image = capture_hidden_window(hwnd)
+                if tray_image is None:
+                    emit("unavailable", state="minimized",
+                         message="微信已隐藏到托盘，暂时无法读取画面；打开微信后可继续。")
+                    last_frame = None
+                    with lock:
+                        latest[0] = None
+                    continue
+                latest_seq[0] += 1
+                frame_seq = latest_seq[0]
+                captured_at_ns = time.monotonic_ns()
+                with frame_clock.get_lock():
+                    frame_clock[0] = frame_seq
+                    frame_clock[1] = captured_at_ns
+                full = tray_image
+                last_frame = None  # compare fresh tray frames normally below
             # A native popup (image preview, file dialog, menu…) keeps its own
             # native top-level relationship; the snapshot is marked unavailable
             # instead of analysing popup text or fighting its position.
             popup_hwnd = popup_covering(hwnd_value)
-            if popup_hwnd:
+            if popup_hwnd and not hidden_now:
                 emit("unavailable", state="popup", popup_hwnd=int(popup_hwnd),
                      message="微信弹窗覆盖聊天区域，已暂停分析，请先关闭弹窗。")
                 last_frame = None
                 with lock:
                     latest[0] = None
                 continue
-            with lock:
-                full, latest[0] = latest[0], None
-                frame_seq = latest_seq[0]
-                captured_at_ns = int(frame_clock[1])
+            if not hidden_now:
+                with lock:
+                    full, latest[0] = latest[0], None
+                    frame_seq = latest_seq[0]
+                    captured_at_ns = int(frame_clock[1])
             if full is None:
                 continue
             if last_frame is not None and full.shape == last_frame.shape and np.array_equal(full, last_frame):
