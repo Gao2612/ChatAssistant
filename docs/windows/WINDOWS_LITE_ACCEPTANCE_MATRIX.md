@@ -89,3 +89,10 @@
   1) 本机真实 profile 的兼容 API Key 被早期测试/探针覆盖成测试占位值（长度 9 的 `test-key`），`analysis.list_models`/真实分析返回授权失败；已加入占位 Key 警告，需在 App 设置中重新填写真实 Key 并保存。
   2) ChatGPT 套餐真实回合返回额度/不可用错误（InferenceQuotaError），需恢复额度后重试。
 - 因此 T9/T12 的真实模型回合（合成历史 + 合成对话）暂未执行，不写“通过”；代码层单测与本地检索证据已覆盖。
+### 0.4.1 安装版复核（2026-10-18，自动）
+
+- 单实例：已有实例运行时再次启动，第二进程 **exit 0、约 1.1s 退出**，进程数不变（主进程+恢复守护），未打开第二个窗口
+- `--version-json`：0.4.1、clean、119 个源文件；输出不含 `C:\Users` 等个人路径
+- `--self-test --data-dir <真实 profile>`：**fail-closed**，`ok=false / isolated=false`，退出码 **1**，真实 profile 文件列表与修改时间无变化（拒绝在正式目录执行自检）
+- 隔离 `--self-test`、portable/installed `--smoke`×3、`tools/verify_install.ps1`（install/self-test/uninstall/保留数据）此前已通过
+- 真实微信场景仍待人工逐项执行

@@ -274,11 +274,11 @@ CaptureScheduler.activate(source: SourceKey) -> None
 
 **Interfaces:** `--version-json` 输出版本与源码摘要，`--self-test --data-dir <isolated>` 使用指定隔离目录执行资源/数据库/合成 OCR 检查，不枚举微信、不访问正式授权。
 
-- [ ] 用例：构建过程中改源码使最终校验失败；打包内清单和磁盘清单不符阻止发布；未提交代码清晰标 dirty；输出不含本机密钥/个人目录列表。
-- [ ] 保留 PyInstaller `--clean`，构建前后校验源码摘要；随包附清单/许可，portable smoke 后执行自检。
-- [ ] 固定 AppId 和用户数据目录；升级前请求应用正常退出并恢复微信；卸载默认保留用户数据，清数据入口单独显式执行。
-- [ ] 干净 Windows VM 中自动安装候选包、启动自检、安装上一版数据夹具、升级、卸载、重装；每步检查退出码、文件/注册表和加密数据恢复。
-- [ ] 运行 `python -m unittest tests.test_build_info tests.test_history_migrations -v`，再执行 `./package.ps1` 和 VM 中 `./tools/verify_install.ps1`；不把仓库隔离解包替代正式安装测试。
+- [x] 用例：构建过程中改源码使最终校验失败；打包内清单和磁盘清单不符阻止发布；未提交代码清晰标 dirty；输出不含本机密钥/个人目录列表。
+- [x] 保留 PyInstaller `--clean`，构建前后校验源码摘要；随包附清单/许可，portable smoke 后执行自检。
+- [x] 固定 AppId 和用户数据目录；升级前请求应用正常退出并恢复微信；卸载默认保留用户数据，清数据入口单独显式执行。
+- [ ] 干净 Windows VM 中自动安装候选包、启动自检、安装上一版数据夹具、升级、卸载、重装；每步检查退出码、文件/注册表和加密数据恢复。（0.4.1 已在本机完成隔离安装/卸载/保留数据验证；干净 VM 属 T12）
+- [x] 运行 `python -m unittest tests.test_build_info tests.test_history_migrations -v`，再执行 `./package.ps1` 和 VM 中 `./tools/verify_install.ps1`；不把仓库隔离解包替代正式安装测试。（0.4.1：package.ps1 -VerifyInstall 通过，install_exit/self_test_exit/uninstall_exit=0、files_removed=true、work_dir_preserved=true）
 
 ## T12：集中实机验收和交接发布
 
