@@ -22,8 +22,10 @@ import urllib.request
 
 from .account_store import (AUTH_BASE, AUTHORIZATION_PATH, API_BASE, RESOURCE,
                             SCOPE_DIRECT, SCOPES, TOKEN_PATH, authorize_params)
-from .analysis import NoRedirectHandler, parse_result, build_payload
+from .analysis import NoRedirectHandler, build_payload
 from .contracts import CancellationToken
+from .inference import GatewayProfile, InferenceGateway
+from .inference_schemas import KIND_REALTIME_REPLY, InferenceRequest
 
 ISSUER = AUTH_BASE
 JWKS_URL = AUTH_BASE + "/.well-known/jwks.json"
@@ -239,68 +241,30 @@ def model_catalog(data):
             and isinstance(x.get("display_name"), str) and isinstance(x.get("slug"), str)]
 
 
-def analyze(config, text):
+def analyze(config, text, cancel=None):
+    """Run the ChatGPT Responses stream through the generic inference gateway.
+
+    The gateway owns the SSE transport, timeouts, cancellation and schema checks;
+    only the allow-listed Responses fields (model/instructions/input/store/stream)
+    are sent, and the prompt is built here so the transport stays prompt-free.
+    """
     token = access_token(config)
     model = config.get("model", "").strip()
     if not model or model not in {slug for _name, slug in config.get("subscription_models", [])}:
         raise ValueError("请选择当前 ChatGPT 账号模型目录中的模型。")
     shared = build_payload(text, config.get("relationship", "普通联系人"),
                            config.get("style", "自然、简短"), model)
+    instructions = shared["messages"][0]["content"]
     prompt = shared["messages"][1]["content"]
-    payload = json.dumps({
-        "model": model, "instructions": shared["messages"][0]["content"],
-        "input": [{"role": "user", "content": [{"type": "input_text", "text": prompt}]}],
-        "store": False, "stream": True,
-    }, ensure_ascii=False).encode("utf-8")
-    request = urllib.request.Request(API_BASE + "/responses", data=payload, headers={
-        "Authorization": "Bearer " + token, "Content-Type": "application/json",
-        "Accept": "text/event-stream",
-    })
-    text_parts, seen = [], 0
-    try:
-        with urllib.request.build_opener(NoRedirectHandler()).open(request, timeout=60) as response:
-            event_type, data_lines = "", []
-            for raw_line in response:
-                seen += len(raw_line)
-                if seen > 1024 * 1024:
-                    raise ValueError("模型响应过大。")
-                line = raw_line.decode("utf-8", "replace").rstrip("\r\n")
-                if not line:
-                    if not data_lines:
-                        event_type = ""
-                        continue
-                    try:
-                        event = json.loads("\n".join(data_lines))
-                    except ValueError:
-                        raise ValueError("ChatGPT 流返回了无效事件。") from None
-                    kind = event_type or event.get("type", "")
-                    if kind == "response.output_text.delta":
-                        text_parts.append(event.get("delta", ""))
-                    elif kind == "response.failed" or kind == "error":
-                        details = event.get("error")
-                        code = event.get("code") or (details.get("code", "") if isinstance(details, dict) else "")
-                        if code in ("subscription_sharing_usage_limit_exceeded", "usage_unavailable"):
-                            raise ValueError("ChatGPT 套餐当前无法继续处理，请在 ChatGPT Usage 页面查看。")
-                        raise ValueError("ChatGPT 分析失败，请稍后重试。")
-                    elif kind == "response.completed":
-                        if text_parts:
-                            return parse_result("".join(text_parts))
-                        output = event.get("response", {}).get("output", [])
-                        collected = "".join(part.get("text", "") for item in output
-                                            for part in item.get("content", [])
-                                            if part.get("type") == "output_text")
-                        return parse_result(collected)
-                    event_type, data_lines = "", []
-                elif line.startswith("event:"):
-                    event_type = line[6:].strip()
-                elif line.startswith("data:"):
-                    data_lines.append(line[5:].lstrip())
-        raise ValueError("ChatGPT 分析流未正常完成，请重试。")
-    except urllib.error.HTTPError as e:
-        if e.code in (301, 302, 303, 307, 308):
-            raise ValueError("ChatGPT 服务返回了不支持的重定向。") from None
-        if e.code == 429:
-            raise ValueError("ChatGPT 账户当前用量受限，请在 ChatGPT Usage 页面查看。") from None
-        raise ValueError(f"ChatGPT 分析失败（HTTP {e.code}）。") from None
-    except (urllib.error.URLError, TimeoutError, OSError):
-        raise ValueError("ChatGPT 分析连接失败或超时。") from None
+    gateway = InferenceGateway(profiles={"chatgpt": GatewayProfile(
+        backend="chatgpt", url=API_BASE + "/responses", model=model, api_key=token)})
+    request = InferenceRequest(
+        task_id="chatgpt-" + secrets.token_hex(8),
+        kind=KIND_REALTIME_REPLY,
+        profile_id="chatgpt",
+        input_data={"instructions": instructions, "input": prompt},
+        schema_version="v1",
+        version_key=f"chatgpt:{model}",
+    )
+    return gateway.run(request, cancel or CancellationToken()).validated_data
+

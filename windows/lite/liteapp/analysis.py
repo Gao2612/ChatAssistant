@@ -1,7 +1,23 @@
+"""Compatible (OpenAI-style) model endpoints and the generic inference entry point.
+
+T3 moved the prompt-independent SSE/HTTP transport, timeout/cancel handling and the
+three output schemas out of this module (see :mod:`liteapp.inference` and
+:mod:`liteapp.inference_schemas`). What stays here is the compatible-API endpoint
+validation, the realtime prompt builder and the ``GET /models`` helper used by the
+settings page. ``analyze`` now delegates to :class:`liteapp.inference.InferenceGateway`
+so the compatible backend gets the same cancellation, timeout and schema checks as
+the ChatGPT backend instead of its own bespoke request code.
+"""
 import json
+import uuid
 import urllib.error
 import urllib.request
 from urllib.parse import urlsplit, urlunsplit
+
+from .contracts import CancellationToken
+from .inference import GatewayProfile, InferenceGateway, NoRedirectHandler
+from .inference_schemas import (KIND_REALTIME_REPLY, InferenceRequest,
+                                parse_realtime_reply)
 
 DEFAULT_LOCAL_BASE = "http://127.0.0.1:11434/v1"
 MAX_RESPONSE = 4 * 1024 * 1024
@@ -58,32 +74,8 @@ def build_payload(text, relationship, style, model):
 
 
 def parse_result(content):
-    s = content.strip()
-    if s.startswith("```"):
-        s = s.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
-    try:
-        obj = json.loads(s)
-    except (ValueError, TypeError):
-        raise ValueError("模型未返回有效 JSON，请重试或更换兼容模型。") from None
-    if not isinstance(obj, dict) or not isinstance(obj.get("replies"), list):
-        raise ValueError("模型回复缺少候选列表。")
-    replies = obj["replies"]
-    if len(replies) != 3 or any(not isinstance(x, str) or not x.strip() or len(x) > 2000 for x in replies):
-        raise ValueError("模型需要返回三条有效回复，请重试。")
-    result = {}
-    for key in ("intent", "need", "action", "caution"):
-        value = obj.get(key, "未提供")
-        if not isinstance(value, str):
-            raise ValueError("模型分析字段格式不正确。")
-        result[key] = value[:2000]
-    result["replies"] = [x.strip() for x in replies]
-    return result
-
-
-class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
-    """Never forward the bearer token or chat body to a redirect destination."""
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        return None
+    """Parse the three-reply realtime schema (kept for existing callers)."""
+    return parse_realtime_reply(content)
 
 
 def _open_json(request, timeout):
@@ -160,7 +152,8 @@ def list_models(config):
     return models
 
 
-def analyze(config, text):
+def analyze(config, text, cancel=None):
+    """Run the compatible backend through the generic inference gateway."""
     backend = config.get("backend", "api")
     base = config.get("base_url", "").strip()
     if backend == "local" and not base:
@@ -169,15 +162,25 @@ def analyze(config, text):
     key = config.get("api_key", "").strip()
     if backend != "local" and not key:
         raise ValueError("请先在设置中填写模型 API Key。")
-    if not config.get("model", "").strip():
+    model = config.get("model", "").strip()
+    if not model:
         raise ValueError("请先填写模型名称。")
     payload = build_payload(text, config.get("relationship", "普通联系人"),
-                            config.get("style", "自然、简短"), config["model"].strip())
-    headers = {"Authorization": "Bearer " + key} if key else {}
-    try:
-        obj = request_json(url, payload, headers, timeout=45)
-        return parse_result(obj["choices"][0]["message"]["content"])
-    except ValueError:
-        raise
-    except (KeyError, IndexError, TypeError):
-        raise ValueError("模型响应不符合 Chat Completions 格式。") from None
+                            config.get("style", "自然、简短"), model)
+    profile = GatewayProfile(
+        backend="compatible", url=url, model=model,
+        api_key=key if backend != "local" or key else "")
+    gateway = InferenceGateway(profiles={"analysis": profile})
+    request = InferenceRequest(
+        task_id="analysis-" + uuid.uuid4().hex,
+        kind=KIND_REALTIME_REPLY,
+        profile_id="analysis",
+        input_data={
+            "messages": payload["messages"],
+            "temperature": payload["temperature"],
+            "max_tokens": payload["max_tokens"],
+        },
+        schema_version="v1",
+        version_key=f"{backend}:{model}",
+    )
+    return gateway.run(request, cancel or CancellationToken()).validated_data
