@@ -145,13 +145,19 @@ def find_conversation(window, title, *, backend=None, capture=None, reader=None,
         backend.key_combo((wa.VK_CONTROL, wa.VK_V))
         time.sleep(settle)
         steps.append("click_result")
-        captured = capture(hwnd)
-        if captured is None:
-            return fail("capture_failed")
-        frame, width, height = captured
-        sidebar = frame[:, :max(1, int(width * 0.32))]
-        candidates = [row for row in _ocr_rows(reader, sidebar)
-                      if title in row[0] and row[2] > 90]
+        candidates = []
+        for _attempt in range(3):
+            captured = capture(hwnd)
+            if captured is None:
+                time.sleep(0.4)
+                continue
+            frame, width, height = captured
+            sidebar = frame[:, :max(1, int(width * 0.32))]
+            candidates = [row for row in _ocr_rows(reader, sidebar)
+                          if title in row[0] and row[2] > 90]
+            if candidates:
+                break
+            time.sleep(0.6)
         if not candidates:
             return fail("result_not_found")
         _text, x0, y0, x1, y1 = candidates[0]
@@ -166,17 +172,28 @@ def find_conversation(window, title, *, backend=None, capture=None, reader=None,
         time.sleep(settle)
         steps.append("verify")
         matched = False
-        for _attempt in range(3):
+        for _attempt in range(4):
             captured = capture(hwnd)
             if captured is None:
                 time.sleep(0.35)
                 continue
             frame, width, height = captured
             header = frame[:max(1, int(height * 0.14)), int(width * 0.22):]
-            header_rows = _ocr_rows(reader, header)
-            if any(_title_matches(row[0], title) for row in header_rows):
+            if any(_title_matches(row[0], title) for row in _ocr_rows(reader, header)):
                 matched = True
                 break
+            # Header OCR sometimes misreads one character (e.g. 郜→部) that the
+            # sidebar result read correctly; try a 2x upscaled crop as well.
+            try:
+                import cv2
+                enlarged = cv2.resize(header, None, fx=2.0, fy=2.0,
+                                      interpolation=cv2.INTER_CUBIC)
+                if any(_title_matches(row[0], title)
+                       for row in _ocr_rows(reader, enlarged)):
+                    matched = True
+                    break
+            except Exception:  # noqa: BLE001 - optional OCR aid
+                pass
             time.sleep(0.35)
         if not matched:
             _escape(backend, hwnd)
