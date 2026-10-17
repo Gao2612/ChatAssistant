@@ -1,4 +1,5 @@
 """Read only capture process. Never reparent, activate or restore WeChat windows."""
+import os
 import queue
 import threading
 import time
@@ -286,7 +287,11 @@ def run(out, stop, hwnd, session, frame_clock, reading_backend="ocr"):
         else:
             emit("closed", message="微信窗口已关闭，等待重新连接。")
     except Exception as e:
-        # Exception class is enough for diagnostics; do not log frames, text or credentials.
+        # Exception class is enough for diagnostics; never log frames, text or
+        # credentials. Opt-in traceback only when explicitly debugging.
+        if os.environ.get("CHATASSISTANT_DEBUG_TRACEBACK"):
+            import traceback
+            traceback.print_exc()
         clear_target()
         stop_capture()
         emit("error", message="采集失败（" + type(e).__name__ + "），请暂停后重试。")
