@@ -18,11 +18,11 @@ from PySide6.QtWidgets import (
 )
 from . import settings
 from .analysis import analyze
-from .contracts import SourceKey
+from .contracts import CancellationToken, SourceKey
 from .state import ConversationState, FrameFreshness, choose_window
 from .discovery import WindowTarget, discover, dpi
 from .worker import run as capture_run
-from . import analysis, backends, codex_backend, reading, subscription
+from . import account_store, analysis, backends, codex_backend, reading, subscription
 from .history_ui import HistoryPage
 from .window_manager import WindowManager, rect_to_physical
 
@@ -81,6 +81,7 @@ class SettingsPage(QWidget):
     codex_done = Signal(object, str)
     models_done = Signal(object, str)
     disconnect_requested = Signal()
+    account_action = Signal(str, str)
 
     def __init__(self, config, parent=None):
         super().__init__(parent)
@@ -185,6 +186,24 @@ class SettingsPage(QWidget):
         model_form.addRow("回复风格", self.style)
         model_layout.addLayout(model_form)
         model_layout.addWidget(self.model_status)
+        account_row = QHBoxLayout()
+        account_row.addWidget(label("ChatGPT 账号", True))
+        self.account_combo = NoWheelComboBox()
+        self.account_combo.setMinimumWidth(240)
+        self.account_switch_button = QPushButton("切换账号")
+        self.account_reauth_button = QPushButton("重新授权")
+        self.account_refresh_models_button = QPushButton("刷新模型")
+        self.account_switch_button.clicked.connect(
+            lambda: self._account_action("switch"))
+        self.account_reauth_button.clicked.connect(
+            lambda: self._account_action("reauth"))
+        self.account_refresh_models_button.clicked.connect(
+            lambda: self._account_action("refresh"))
+        account_row.addWidget(self.account_combo, 1)
+        account_row.addWidget(self.account_switch_button)
+        account_row.addWidget(self.account_reauth_button)
+        account_row.addWidget(self.account_refresh_models_button)
+        model_layout.addLayout(account_row)
         self.backend.currentIndexChanged.connect(self.backend_changed)
         self.provider.currentIndexChanged.connect(self.provider_changed)
         self.models_done.connect(self.models_checked)
@@ -288,6 +307,39 @@ class SettingsPage(QWidget):
             self.chatgpt_button.setText("连接 ChatGPT 套餐")
         self.chatgpt_state.setText(text)
         self.disconnect_chatgpt_button.setVisible(connected)
+
+    def set_accounts(self, registrations):
+        """Render the ChatGPT registrations with their lifecycle status."""
+        current = self.account_combo.currentData()
+        self.account_combo.blockSignals(True)
+        self.account_combo.clear()
+        selected_index = 0
+        status_text = {"connected": "已连接", "login_only": "仅登录",
+                       "reauth_required": "需重新授权"}
+        for registration in registrations or []:
+            registration_id = str(registration.get("registration_id") or "")
+            if not registration_id:
+                continue
+            label = str(registration.get("label") or "ChatGPT 账号")
+            status = status_text.get(str(registration.get("status") or ""),
+                                     str(registration.get("status") or ""))
+            self.account_combo.addItem(f"{label} · {status}", registration_id)
+            if registration.get("selected") or registration_id == current:
+                selected_index = self.account_combo.count() - 1
+        if self.account_combo.count():
+            self.account_combo.setCurrentIndex(selected_index)
+        self.account_combo.blockSignals(False)
+        has_accounts = self.account_combo.count() > 0
+        for button in (self.account_switch_button, self.account_reauth_button,
+                       self.account_refresh_models_button):
+            button.setEnabled(has_accounts)
+
+    def _account_action(self, action):
+        registration_id = self.account_combo.currentData()
+        if action in ("switch", "reauth") and not registration_id:
+            self.chatgpt_state.setText("请先连接或选择一个 ChatGPT 账号。")
+            return
+        self.account_action.emit(action, str(registration_id or ""))
 
     def refresh_effective(self, config=None):
         current = dict(config if config is not None else self.config)
@@ -483,6 +535,7 @@ class ResultBus(QObject):
     done = Signal(object, object, str)
     subscription_done = Signal(object, object, str)
     read_done = Signal(object, object, str)
+    account_done = Signal(str, object, str)
 
 
 class BrandMark(QWidget):
@@ -521,13 +574,15 @@ class BrandMark(QWidget):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, config=None, scanning=True, window_manager=None):
+    def __init__(self, config=None, scanning=True, window_manager=None, account_store=None):
         super().__init__()
-        self.setWindowTitle("微信实时助手 · 便捷版 0.3.1")
+        self.setWindowTitle("微信实时助手 · 便捷版 0.4.0")
         self.resize(1180, 790)
         self.setMinimumSize(850, 600)
         self.setStyleSheet(STYLE)
         self.config = config if config is not None else settings.load()
+        self._account_store = account_store
+        self.account_busy = False
         self.state = ConversationState()
         self.child = self.stop_event = self.capture_q = None
         self.window_item = None
@@ -561,6 +616,7 @@ class MainWindow(QMainWindow):
         self.bus.done.connect(self.analysis_done)
         self.bus.subscription_done.connect(self.subscription_done)
         self.bus.read_done.connect(self.reading_done)
+        self.bus.account_done.connect(self.account_action_done)
         root = QWidget()
         self.setCentralWidget(root)
         layout = QHBoxLayout(root)
@@ -683,6 +739,8 @@ class MainWindow(QMainWindow):
         self.settings_page.saved.connect(self.settings_saved)
         self.settings_page.cancel_requested.connect(self.show_chat)
         self.settings_page.disconnect_requested.connect(self.disconnect_chatgpt)
+        self.settings_page.account_action.connect(self._on_account_action)
+        self.settings_page.set_accounts(self.config.get("registrations") or [])
         self.refresh_effective_model()
         self.page_stack.addWidget(self.settings_page)
         self.history_page = HistoryPage()
@@ -696,7 +754,7 @@ class MainWindow(QMainWindow):
         self.settings_page.refresh_button.clicked.connect(self.refresh_windows)
         self.settings_page.launch_button.clicked.connect(self.launch_wechat)
         self.settings_page.disconnect_button.clicked.connect(self.disconnect_capture)
-        self.chatgpt_button.clicked.connect(self.connect_chatgpt)
+        self.chatgpt_button.clicked.connect(self.connect_account_new)
         self.auto_analysis.toggled.connect(self.auto_toggled)
         layout.addWidget(self.page_stack, 1)
 
@@ -1313,7 +1371,184 @@ class MainWindow(QMainWindow):
     def refresh_effective_model(self):
         self.effective_label.setText("分析：" + backends.describe_analysis(self.config))
 
+    def _store(self):
+        if self._account_store is None:
+            self._account_store = account_store.AccountStore(settings.data_dir())
+        return self._account_store
+
+    def _on_account_action(self, action, registration_id):
+        if action == "switch":
+            self.switch_account(registration_id)
+        elif action == "reauth":
+            self.reauth_account(registration_id)
+        elif action == "refresh":
+            self.refresh_account_models()
+
+    def _apply_fresh_account_state(self, fresh=None):
+        fresh = settings.load() if fresh is None else fresh
+        for key in ("subscription", "subscription_models", "registration_id",
+                    "active_registration_id", "registrations", "_account_revision",
+                    "host_id"):
+            if key in fresh:
+                self.config[key] = fresh[key]
+        if backends.analysis_backend(self.config) == "chatgpt":
+            effective = backends.effective_model(self.config)
+            if effective:
+                self.config["model"] = effective
+                self.config["chatgpt_model"] = effective
+        self.settings_page.config = dict(self.config)
+        self.settings_page.set_accounts(self.config.get("registrations") or [])
+        self.settings_page.update_chatgpt_state(self.config)
+        if backends.analysis_backend(self.config) == "chatgpt":
+            self.settings_page.backend.setCurrentIndex(
+                max(0, self.settings_page.backend.findData("chatgpt")))
+            self.settings_page.set_models(self.config.get("subscription_models") or [])
+        self.refresh_effective_model()
+
+    def switch_account(self, registration_id):
+        if not registration_id:
+            return
+        try:
+            self._store().select(registration_id)
+            self._apply_fresh_account_state()
+        except (OSError, ValueError) as exc:
+            self.set_notice(f"切换账号失败：{exc}")
+            return
+        self.set_notice("已切换 ChatGPT 账号；分析将使用该账号的模型。")
+
+    def reauth_account(self, registration_id):
+        if not registration_id:
+            return
+        try:
+            self._store().select(registration_id)
+        except (OSError, ValueError) as exc:
+            self.set_notice(f"选择账号失败：{exc}")
+            return
+        self.connect_account_new(registration_id)
+
+    def connect_account_new(self, registration_id=None):
+        if self.subscription_busy:
+            return
+        self.subscription_busy = True
+        self.chatgpt_button.setEnabled(False)
+        self.set_notice("正在启动 OpenAI 官方授权流程。请在浏览器确认后返回此应用。")
+
+        def work():
+            try:
+                store = self._store()
+                attempt = account_store.AuthAttempt(store)
+                attempt.start(registration_id)
+                registration = attempt.wait()
+                fresh = settings.load()
+                models = []
+                model_error = ""
+                try:
+                    models = subscription.list_models(fresh)
+                except ValueError as exc:
+                    model_error = str(exc)
+                if models:
+                    try:
+                        store.update_model_catalog(registration.registration_id, models)
+                    except (OSError, ValueError):
+                        pass
+                self.bus.account_done.emit(
+                    "connect", {"registration": registration, "models": models}, model_error)
+            except Exception as exc:  # noqa: BLE001 - UI thread reports the message
+                self.bus.account_done.emit(
+                    "connect", None,
+                    str(exc) if isinstance(exc, ValueError)
+                    else "ChatGPT 授权失败，请检查网络后重试。")
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def refresh_account_models(self):
+        if self.account_busy:
+            return
+        self.account_busy = True
+        self.set_notice("正在刷新账号模型目录…")
+
+        def work():
+            try:
+                fresh = settings.load()
+                models = subscription.list_models(fresh)
+                registration_id = (fresh.get("registration_id")
+                                   or fresh.get("active_registration_id"))
+                if registration_id:
+                    try:
+                        self._store().update_model_catalog(registration_id, models)
+                    except (OSError, ValueError):
+                        pass
+                self.bus.account_done.emit("models", models, "")
+            except Exception as exc:  # noqa: BLE001 - UI thread reports the message
+                self.bus.account_done.emit(
+                    "models", None,
+                    str(exc) if isinstance(exc, ValueError)
+                    else "刷新模型目录失败，请检查网络后重试。")
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def account_action_done(self, action, payload, error):
+        self.subscription_busy = False
+        self.account_busy = False
+        self.chatgpt_button.setEnabled(True)
+        if error:
+            self.set_notice(error)
+            return
+        if action == "connect":
+            data = payload or {}
+            models = data.get("models") or []
+            try:
+                self._apply_fresh_account_state()
+            except (OSError, ValueError):
+                pass
+            self.config["backend"] = "chatgpt"
+            if models:
+                self.config["subscription_models"] = [list(item) for item in models]
+                if not backends.effective_model(self.config):
+                    self.config["chatgpt_model"] = models[0][1]
+                    self.config["model"] = models[0][1]
+                self.settings_page.backend.setCurrentIndex(
+                    max(0, self.settings_page.backend.findData("chatgpt")))
+                self.settings_page.set_models(models)
+                try:
+                    settings.save(self.config)
+                except OSError:
+                    pass
+                self.refresh_effective_model()
+                self.set_notice(f"已连接 ChatGPT，读取到 {len(models)} 个可用模型。")
+            else:
+                self.set_notice("授权已完成，但模型目录暂不可用；请点“刷新模型”。")
+        elif action == "models":
+            models = payload or []
+            try:
+                self._apply_fresh_account_state()
+            except (OSError, ValueError):
+                pass
+            self.settings_page.set_models(models)
+            if models:
+                self.settings_page.model_status.setText(f"已刷新 {len(models)} 个模型。")
+            self.set_notice("账号模型目录已刷新。")
+
     def disconnect_chatgpt(self):
+        registration_id = (self.config.get("registration_id")
+                           or self.config.get("active_registration_id"))
+        if registration_id:
+            try:
+                result = self._store().sign_out(registration_id, CancellationToken())
+            except (OSError, ValueError) as exc:
+                self.set_notice(f"退出账号失败：{exc}")
+                return
+            try:
+                self._apply_fresh_account_state()
+            except (OSError, ValueError):
+                pass
+            self.state.invalidate()
+            self.clear_results()
+            self.set_notice(result.message or (
+                "已撤销 ChatGPT 授权。" if result.revoked
+                else "已在本机退出 ChatGPT（远程撤销未确认）。"))
+            return
+        # Legacy single-account snapshot from before T2: clear the compatibility view.
         self.config["subscription"] = None
         self.config["subscription_models"] = []
         self.config["chatgpt_model"] = ""
