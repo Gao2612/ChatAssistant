@@ -111,6 +111,12 @@ def load(folder=None):
             result["host_id"] = "urn:uuid:" + str(uuid.uuid4())
     except (OSError, ValueError, TypeError, KeyError):
         result["_warning"] = "设置或密钥无法读取，请重新保存设置。"
+    # Placeholder keys from tests/probes are never valid credentials; surface them
+    # instead of silently failing every analysis request.
+    if result.get("api_key") in ("test-key", "synthetic", "synthetic-key", "test"):
+        result["_warning"] = (
+            "当前 API Key 是测试占位值（可能由早期测试写入），请在设置中重新填写"
+            "真实 Key 并保存。")
     try:
         from . import account_store
         result.update(account_store.settings_view(saved, dest))
