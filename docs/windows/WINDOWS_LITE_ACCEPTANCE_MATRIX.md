@@ -166,3 +166,10 @@
 - 发现并修复：托盘捕获后窗口可能停在离屏位置/仍可见；现在用 `SWP_HIDEWINDOW` 原子恢复几何+隐藏，若仍可见再隐藏；新增“隐藏窗口几何/可见性恢复”测试
 - 自动找对话：代码级真实查找“田子夜” `ok=true`；通过 UI 按钮跨进程触发仍偶发 `result_not_found/search_not_found`（应用内自动连接、读数本次成功：编辑区 106 字符），已加大搜索重试与 4 帧结果等待，仍需人工点击复验；不写通过
 - 全量 666 项测试 exit 0
+### 候选包 0.5.7（动作期间暂停采集，2026-10-18）
+
+- 版本 0.5.7；安装包 SHA-256 `35C37FEC197C9B088FB79F36F831B9624093BD6D3427B898AFA679B57CE3E34E`
+- Git `32fc8f2`（clean）、130 个源文件；`--version-json` 0.5.7；隔离 `--self-test` exit 0；`--smoke` exit 0；`package.ps1 -VerifyInstall` ok=true
+- 真实复现：应用已连接时，第二个 WGC 会话（动作里的 OCR 采集）会被 UI 的持续采集抢帧，导致 `search_not_found/result_not_found`；改为动作前 `stop_capture()`、动作结束后 `wechat_action_done` 自动重连
+- 修复后 UI 跨进程触发仍然得到 `没有找到微信搜索框`；代码级直接查找在相同窗口 `ok=true`。说明还有跨进程/前台时序因素，UI 点击路径保留人工验收，不写通过
+- 全量 668 项测试 exit 0
