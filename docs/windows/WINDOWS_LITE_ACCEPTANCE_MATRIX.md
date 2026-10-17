@@ -96,3 +96,9 @@
 - `--self-test --data-dir <真实 profile>`：**fail-closed**，`ok=false / isolated=false`，退出码 **1**，真实 profile 文件列表与修改时间无变化（拒绝在正式目录执行自检）
 - 隔离 `--self-test`、portable/installed `--smoke`×3、`tools/verify_install.ps1`（install/self-test/uninstall/保留数据）此前已通过
 - 真实微信场景仍待人工逐项执行
+### OCR 自动找对话（真实窗口，2026-10-18）
+
+- 场景：安装版 0.4.1 已通过 UI 连接微信（状态“正在本地识别 · 中央实时画面”，镜像预览，停靠开关为关；OCR 文字区长度约 390 字符）。
+- 旧固定比例方案在真实窗口上失败（`title_mismatch`），改为 OCR 定位搜索框/结果行 + 严格标题校验 + 前台锁兼容激活后：应用处于前台时自动查找“田子夜” **ok=true**（activate→capture→find_search→paste_title→click_result→verify，约 11s）。
+- 全程未发送消息；失败路径会按 ESC 关闭搜索并 fail-closed。
+- 0.4.1 安装包尚未包含该修复，需下一次打包验证 UI 内的同一流程。
