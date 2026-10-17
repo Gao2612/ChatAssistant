@@ -102,3 +102,10 @@
 - 旧固定比例方案在真实窗口上失败（`title_mismatch`），改为 OCR 定位搜索框/结果行 + 严格标题校验 + 前台锁兼容激活后：应用处于前台时自动查找“田子夜” **ok=true**（activate→capture→find_search→paste_title→click_result→verify，约 11s）。
 - 全程未发送消息；失败路径会按 ESC 关闭搜索并 fail-closed。
 - 0.4.1 安装包尚未包含该修复，需下一次打包验证 UI 内的同一流程。
+### 候选包 0.4.3（2026-10-18，OCR 自动找对话 / 前台激活修复）
+
+- 版本 0.4.3，安装包 SHA-256：`1F0E7AE47F9FC84E2BD6045AC802E8E3744ED1A661510AA3455416055B17550B`
+- Git `5cafa1a`（clean）；`--version-json` 0.4.3，125 个源文件；隔离 `--self-test` exit 0；`package.ps1 -VerifyInstall` install/self-test/uninstall/保留数据 `ok=true`；`--smoke` exit 0
+- 已覆盖安装到 `E:\ChatAssistantLite`（0.4.3 窗口标题确认）
+- 代码级真实验收：应用前台时 OCR 自动找对话“田子夜” `ok=true`（约 11s，未发送消息）
+- 应用内一键自动找对话的跨进程点击验证受 UIA/连接时序影响仍不稳定，保留人工点击验收（0.4.1 已验证应用内可连接微信并显示镜像预览）
