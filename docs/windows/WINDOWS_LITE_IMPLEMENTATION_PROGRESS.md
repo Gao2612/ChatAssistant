@@ -36,11 +36,12 @@
 | T6 导入器 | ✅ 2026-10-18 完成，commit `214b6fe` | importers/ + import_jobs.py + history_ui 最小导入 UI；pypdfium2 固定版本与许可入库；定向 58 项、全套 376 项通过；ExportWeChat 无真实样本 |
 | T7 全量历史模型分析 | 🟡 队友 inference 实现中（task-11） | `history_jobs.py`/`history_prompts.py`/`history_analysis_store.py`；依赖 T3 网关与 T5 store（均已完成） |
 | T8 档案/趋势/统计/任务界面 | 🟡 队友 history 实现中（task-12） | `history_statistics.py`/`profile_ui.py` + history_ui/report；T7 report 联调待接 |
-| T9 记忆检索与实时建议整合 | ⏳ 未开始（Lead，依赖 T3/T5/T7） | `memory_retrieval.py`/`conversation_binding.py`/`realtime.py` |
+| T9 记忆检索与实时建议整合 | 🟡 Lead 前半实现中（task-16，不碰 ui.py） | `conversation_binding.py`/`memory_retrieval.py`/`realtime.py`；ui.py/analysis.py 集成待 T4-UI 释放后 |
 | T10 多微信来源调度 | ⏳ 未开始（Lead，依赖 T9） | `source_registry.py`/`capture_scheduler.py` |
 | T11 构建追溯与安装生命周期 | 🟡 工具与 main 入口接线已提交（`11ba51f`、`617a89f`），待重建/隔离安装验证 | build_info/self-test/verify_install + `--version-json`/`--self-test`/`--lite-pdf-worker` 分发；正式安装升级/卸载与干净 VM 未验证 |
 | T12 集中实机验收 | 🟡 矩阵与只读证据脚本已建（`b15194f`），未执行场景 | 待 T7–T11 合并后重建候选包；人工扫码/输入法/弹窗在 T12 |
-| REVIEW 独立代码审查 | 🟡 队友 contracts 进行中（task-13） | T1–T6/T11 安全边界、ScopeKey/版本、不可信输入、测试有效性 |
+| REVIEW 独立代码审查 | ✅ 完成：P1 三项均为待做 UI 接线；P2 R-04/05/06 与 R-09 已派 contracts（task-15）；P3 记录/择机 | REVIEW_report.md：383 基线、9/9 变异捕获；R-01/02/03 = T2/T3/T4-UI；R-07 在 T4-UI 修 |
+| P2 修复 | 🟡 contracts 进行中（task-15） | R-05 SSE 有界读取、R-06 证据强制、R-04 超时页重试、R-09 自检目录校验 |
 | OCR 后自动分析 | 回归修复已落码，单测通过 | `state.py` 修订语义 + `ui.py` 重检恢复；`test_auto_pipeline.py` 4 项。0.2 安装包不包含该修复，需安装 0.3 包 |
 | 读取/分析独立配置 | ✅ 2026-10-18 已落码，单测通过 | `settings.py`（读取键 + DPAPI `protected_reading_key`）、`backends.py`、`reading.py`、`codex_backend.py`、`worker.py`、`ui.py`；86 项测试通过 |
 | 读取后端：本地 OCR | 默认保留，完全离线 | `worker.py`；原有验证 |
