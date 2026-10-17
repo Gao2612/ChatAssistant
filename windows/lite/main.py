@@ -1,9 +1,57 @@
+import json
 import multiprocessing
 import os
 from pathlib import Path
 import sys
 
 _DLL_SEARCH_HANDLES = []
+
+
+def _flag_value(argv, name):
+    """Value of ``--name value`` or ``--name=value`` in argv; None when absent."""
+    for index, item in enumerate(argv):
+        if item == name and index + 1 < len(argv):
+            return argv[index + 1]
+        if item.startswith(name + "="):
+            return item.split("=", 1)[1]
+    return None
+
+
+def print_version_json():
+    """T11: version + source digest for installed builds (no Qt, no user data)."""
+    from liteapp import build_info
+
+    if getattr(sys, "frozen", False):
+        manifest = Path(sys.executable).resolve().parent / "build_info.json"
+        try:
+            info = json.loads(manifest.read_text(encoding="utf-8"))
+            if not isinstance(info, dict):
+                raise ValueError("manifest is not an object")
+        except (OSError, ValueError):
+            info = {"app_version": build_info.APP_VERSION, "source_digest": None,
+                    "error": "build_info.json missing or invalid"}
+    else:
+        info = build_info.collect()
+    print(json.dumps(info, ensure_ascii=False))
+    return 0
+
+
+def run_self_test(argv):
+    """T11: isolated self-test; never touches the real profile or network."""
+    from liteapp import self_test
+
+    data_dir = _flag_value(argv, "--data-dir")
+    report = self_test.run(data_dir)
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 0 if report["ok"] else 1
+
+
+def run_pdf_worker(argv):
+    """T11/T6: packaged PDF worker dispatch (``--lite-pdf-worker``)."""
+    from liteapp.importers.pdf import worker_main
+
+    forwarded = [item for item in argv if item != "--lite-pdf-worker"]
+    return worker_main(forwarded)
 
 
 def configure_frozen_dll_search():
@@ -78,11 +126,18 @@ def start_recovery_supervisor(data_dir):
 
 def main():
     configure_frozen_dll_search()
-    # Recovery guard child mode: no Qt, no instance lock, no user data reads
-    # beyond the signed geometry records it was started for.
-    if "--recovery-guard" in sys.argv[1:]:
+    argv = sys.argv[1:]
+    # Headless modes must be handled before the single-instance lock and Qt: they
+    # are used by the installer/self-test and by the guarded PDF worker process.
+    if "--recovery-guard" in argv:
         from liteapp.recovery_guard import supervisor_main
         return supervisor_main(sys.argv[1:])
+    if "--lite-pdf-worker" in argv:
+        return run_pdf_worker(argv)
+    if "--version-json" in argv:
+        return print_version_json()
+    if "--self-test" in argv:
+        return run_self_test(argv)
     data_dir = resolve_data_dir()
     guard, owned = claim_instance(data_dir)
     if not owned:
