@@ -27,9 +27,9 @@
 | T0b ChatGPT 绑定记忆（点4） | ✅ 2026-10-18 已落码并 commit `ffbe6ce` | 诊断：凭据与 refresh token 持久化/刷新正常，根因是模型记忆与提示；新增 `chatgpt_model` 等分后端字段、自动恢复、授权状态与「断开授权」；重启不再要求浏览器授权 |
 | T1 契约与单实例 | ✅ 2026-10-18 完成，commit `4f3655b` | `liteapp/contracts.py`、`single_instance.py`、`state.py` 作用域/摘要、`main.py` 单实例；定向 55 项、全套 137 项通过；双进程激活与 smoke 实测 |
 | T2 账号注册与授权生命周期 | ✅ 后端完成，commit `a06f9a7`；UI 拆到 T2-UI | `account_store.py` 单写者/原子保存/刷新 CAS/权限状态/退出；settings/subscription 路由；定向 32 项、相关回归 144 项通过 |
-| T2-UI 集成本地账号管理界面 | 🟡 Lead 进行中 | 设置页多账号列表/新增/切换/重新授权/退出/刷新模型；用 AuthAttempt 非阻塞 + Signal 回主线程；不把 subscription=None 当断开 |
+| T2-UI 集成本地账号管理界面 | ✅ 2026-10-18 完成，commit `239545e` | 账号列表/切换/重新授权/刷新模型/退出（AccountStore.sign_out）；AuthAttempt 连接新账号；4 项 UI 测试；0.4.0 | 设置页多账号列表/新增/切换/重新授权/退出/刷新模型；用 AuthAttempt 非阻塞 + Signal 回主线程；不把 subscription=None 当断开 |
 | T3 通用模型层/取消/调度 | ✅ 2026-10-18 完成，commit `e66cb5d` | `inference.py`/`inference_schemas.py`/`inference_queue.py` + analysis/subscription 路由；定向 41 项、相关回归 158 项、全套 376 项通过 |
-| T3-UI 接推理队列 | 🟡 Lead 进行中 | ui.py 自动分析改 `queue.submit + set_callback + Qt dispatch`；切会话 `cancel_scope`；额度错误 pause 提示 |
+| T3-UI 接推理队列 | 🟡 Lead 待做 | ui.py 自动分析改 `queue.submit + set_callback + Qt dispatch`；切会话 `cancel_scope`；额度错误 pause 提示 |
 | T4 原生停靠/焦点/恢复 | ✅ 2026-10-18 完成，commit `645144a` | `window_manager.py`、`recovery_guard.py` + 合成窗口 fixture；discovery/window_dock/worker/main 加固；定向 100 项、排除 WIP 线 315 项通过 |
 | T4-UI 接 WindowManager | ✅ 2026-10-18 完成，commit `403c526` | ui.py 全面接入 WindowManager：set_view/健康只读回退/record_* 新鲜度/detach；R-07 修复；26 项新增、200 回归、520 全套 |
 | T5 历史 V2/迁移 | ✅ 2026-10-18 完成，commit `8dfcecc` | `history_models.py`、`history_migrations.py`、V2 `history.py`；强制 ScopeKey/版本语义/事务迁移/DPAPI；历史定向 38 项、排除 T4 线的全模块 199 项通过 |
@@ -40,6 +40,9 @@
 | T10 多微信来源调度 | ⏳ 未开始（Lead，依赖 T9） | `source_registry.py`/`capture_scheduler.py` |
 | T11 构建追溯与安装生命周期 | 🟡 工具与 main 入口接线已提交（`11ba51f`、`617a89f`），待 0.4 重建/隔离安装验证 | build_info/self-test/verify_install + `--version-json`/`--self-test`/`--lite-pdf-worker` 分发；正式安装升级/卸载与干净 VM 未验证 |
 | T12 集中实机验收 | 🟡 矩阵与只读证据脚本已建（`b15194f`），未执行场景 | 待 T7–T11 合并后重建候选包；人工扫码/输入法/弹窗在 T12 |
+| D-UI 按设计 Skills 重构 UI | ⏳ 用户新增，排在功能与验收之后 | frontend-design / ui-ux-pro-max / impeccable / web-design-guidelines / theme-factory / canvas-design / web-artifacts-builder / brand-guidelines / react-best-practices / webapp-testing；PySide6 桌面 UI 按设计原则重构，React/Next 条目仅取可迁移原则 |
+| 设置下拉禁滚轮 | ✅ commit 29678b1 | 所有设置下拉 NoWheelComboBox，滚轮不改选择，弹窗最多 20 行 |
+
 | REVIEW 独立代码审查 | ✅ 完成：P1 三项均为待做 UI 接线；P2 R-04/05/06 与 R-09 已派 contracts（task-15）；P3 记录/择机 | REVIEW_report.md：383 基线、9/9 变异捕获；R-01/02/03 = T2/T3/T4-UI；R-07 在 T4-UI 修 |
 | P2 修复 | ✅ 2026-10-18 完成，commit `4cb2268` | R-05 SSE 有界（16.9MB→0.43MB）、R-06 证据强制、R-04 超时页重试、R-09 自检隔离、HTTP400 可操作提示；124 项回归通过 |
 | OCR 后自动分析 | 回归修复已落码，单测通过 | `state.py` 修订语义 + `ui.py` 重检恢复；`test_auto_pipeline.py` 4 项。0.2 安装包不包含该修复，需安装 0.3 包 |

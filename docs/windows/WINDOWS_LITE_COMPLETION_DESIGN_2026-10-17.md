@@ -228,6 +228,8 @@ HTML 不执行脚本、不取远程资源、不自动打开附件。PDF 保留�
 
 ## 8. 界面完成形态
 
+> 2026-10-18 用户补充：T1–T12 与验收完成后，按 10 个设计/前端 Skills（frontend-design、ui-ux-pro-max、impeccable、web-design-guidelines、theme-factory、canvas-design、web-artifacts-builder、brand-guidelines、react-best-practices、webapp-testing）重构本项目 UI。PySide6 桌面界面采用其中的布局/字体/配色/可访问性/动效原则；React/Next 与 web-artifacts 条目只取可迁移的交互与结构原则。
+
 ### 8.1 实现补充（2026-10-18，T8）
 
 - 历史页主流程改为“当前联系人 + 导入聊天记录”；账号选择移出主流程，首次导入确认后创建独立 UUID，同名不合并；保留“选择其他联系人”离线入口。
