@@ -23,9 +23,14 @@
 | 项目 | 状态 | 证据/下一步 |
 | --- | --- | --- |
 | 每小时继续 | 已创建 | heartbeat，当前聊天，每小时尝试；额度限制时保存进度 |
-| T0a 外部 API 配置（点1） | ✅ 2026-10-18 已落码，全套测试通过 | 厂商预设 + `analysis.list_models`（GET /models）+ 自动读取 + 当前生效后端/模型显示 + 卡片内保存；`test_analysis_models.py` 等 |
-| T0b ChatGPT 绑定记忆（点4） | ✅ 2026-10-18 已落码，全套测试通过 | 诊断：凭据与 refresh token 持久化/刷新正常，根因是模型记忆与提示；新增 `chatgpt_model` 等分后端字段、自动恢复、授权状态与「断开授权」；重启不再要求浏览器授权 |
-| T1 契约与单实例 | ✅ 2026-10-18 完成（commit 待记） | `liteapp/contracts.py`、`single_instance.py`、`state.py` 作用域/摘要、`main.py` 单实例；定向 55 项、全套 137 项通过；双进程激活与 smoke 实测 |
+| T0a 外部 API 配置（点1） | ✅ 2026-10-18 已落码并 commit `ffbe6ce` | 厂商预设 + `analysis.list_models`（GET /models）+ 自动读取 + 当前生效后端/模型显示 + 卡片内保存；`test_analysis_models.py` 等 |
+| T0b ChatGPT 绑定记忆（点4） | ✅ 2026-10-18 已落码并 commit `ffbe6ce` | 诊断：凭据与 refresh token 持久化/刷新正常，根因是模型记忆与提示；新增 `chatgpt_model` 等分后端字段、自动恢复、授权状态与「断开授权」；重启不再要求浏览器授权 |
+| T1 契约与单实例 | ✅ 2026-10-18 完成，commit `4f3655b` | `liteapp/contracts.py`、`single_instance.py`、`state.py` 作用域/摘要、`main.py` 单实例；定向 55 项、全套 137 项通过；双进程激活与 smoke 实测 |
+| T2 账号注册与授权生命周期 | 🟡 队友 inference 实现中（task-4） | `account_store.py` + settings/subscription；UI 由 Lead 集成 |
+| T3 通用模型层/取消/调度 | 🟡 队友 inference 排队（task-5，T2 后做） | `inference*.py` + analysis/subscription |
+| T4 原生停靠/焦点/恢复 | 🟡 队友 windows 实现中（task-6） | `window_manager.py`、`recovery_guard.py` + 合成窗口 fixture |
+| T5 历史 V2/迁移 | 🟡 队友 history 实现中（task-7） | `history_models.py`、`history_migrations.py`、history.py |
+| T6 导入器 | 🟡 队友 history 排队（task-8，T5 后做） | importers/ + import_jobs.py |
 | OCR 后自动分析 | 回归修复已落码，单测通过 | `state.py` 修订语义 + `ui.py` 重检恢复；`test_auto_pipeline.py` 4 项。0.2 安装包不包含该修复，需安装 0.3 包 |
 | 读取/分析独立配置 | ✅ 2026-10-18 已落码，单测通过 | `settings.py`（读取键 + DPAPI `protected_reading_key`）、`backends.py`、`reading.py`、`codex_backend.py`、`worker.py`、`ui.py`；86 项测试通过 |
 | 读取后端：本地 OCR | 默认保留，完全离线 | `worker.py`；原有验证 |
@@ -37,10 +42,11 @@
 | 分析后端：Codex | ✅ 已落码；真实免费 RPC 验证 | `codex_backend.analyze`；真实文本回合未执行（额度） |
 | 中央遮挡/当前联系人导入 | 未修复 | 根因与目标已写入设计和 T4/T8/T9 |
 | T1–T12 | 待执行 | 逐任务更新，不把旧单元通过计为新任务完成 |
-| 0.3 安装包 | 0.3.0 已构建并安装；T0a/T0b 后重建 0.3.1 待执行 | `build.ps1` / `installer/ChatAssistantLite.iss`；E:\ChatAssistantLite 原地升级，桌面快捷方式保留 |
+| 0.3 安装包 | ✅ 0.3.1 已构建并覆盖安装到 E:\ChatAssistantLite（桌面/开始菜单快捷方式保留） | 安装器 99,456,186 B，SHA-256 `6A35A86AD8BD4C1F48C877566BB8F578ABFCDE58DA7282766F1DF2FD7DA0F987`；卸载注册表 0.3.1；安装后 `--smoke` 退出码 0 |
 
 ## 最新验证
 
+- 2026-10-18：**0.3.1 已构建并覆盖安装**：安装器 SHA-256 `6A35A86AD8BD4C1F48C877566BB8F578ABFCDE58DA7282766F1DF2FD7DA0F987`；卸载注册表版本 0.3.1，安装目录 `E:\ChatAssistantLite`，桌面快捷方式指向该 exe；安装后 `--smoke` 退出码 0。
 - 2026-10-18：T0a/T0b 落码后 `python -m unittest discover -s tests -q` → **137 项通过**（含 T1 队友并行新增的 contracts/single_instance 用例与 Lead 新增的 `test_analysis_models.py`）。T0a/T0b 单独覆盖：模型列表读取、厂商预设、分后端模型记忆、重启恢复、断开授权、ChatGPT 有效模型回退。
 - 2026-10-18：真实 ChatGPT 凭据诊断：`protected_subscription` 与 refresh_token 存在；access token 过期后 `subscription.access_token()` 刷新成功并回写 DPAPI（不消耗模型额度）。
 - 2026-10-18：`python -m unittest discover -s tests -q` → 86 项通过（T1 队友用例加入前）。
