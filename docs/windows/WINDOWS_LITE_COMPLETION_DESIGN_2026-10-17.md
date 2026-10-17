@@ -235,6 +235,7 @@ HTML 不执行脚本、不取远程资源、不自动打开附件。PDF 保留�
 - 回复风格从单一文本扩展为多预设（自然简短/专业正式/亲切热情/直接干脆/幽默轻松/高情商委婉/商务谈判/温柔耐心/简洁书面），仍可手写自定义。
 - 微信隐藏到托盘/任务栏后项目应能发现窗口；已有微信进程时绝不重复启动新实例，用户显式点击时恢复已有窗口（不抢焦点、不 SetParent）。
 - 通过分析已导入 HTML/PDF 中“我”的发言生成专属回复风格：本地可解释特征；模型提示词用精简的 `prompt_style`（300–600 字），用户可查看 `display_report`（800–1500 字，含统计指标与“推断/不确定”标签，不输出长段真实原文）；两层都按 ScopeKey 加密派生存储，来源删除/记忆版本变化后失效；设置页选用。
+- 项目内微信预览不得改变原生微信窗口的大小/位置：默认“镜像只读预览”（原生窗口可自由拖动，应用只显示缩放画面），需要交互时用户显式开启“停靠微信窗口”（默认关闭，开启后会移动/适配原生窗口并提示）。resize 应用窗口只缩放预览，不修改原生窗口几何。
 - 全部功能与验收完成后，最后执行 D-UI：按 10 个设计/前端 Skills 重构 PySide6 界面（frontend-design、ui-ux-pro-max、impeccable、web-design-guidelines、theme-factory、canvas-design、web-artifacts-builder、brand-guidelines、react-best-practices、webapp-testing；React/Next 条目只取可迁移原则）。D-UI 固定排在所有 T/S 任务之后。
 
 
