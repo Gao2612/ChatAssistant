@@ -19,6 +19,9 @@ DEFAULTS = {
     # Mirror preview is the default: resizing the assistant window never moves or
     # resizes the native WeChat window. Users can opt into docking explicitly.
     "dock_wechat": False,
+    # Background monitoring is opt-in and bounded; other windows keep their own
+    # normal window and are never moved or typed into.
+    "background_monitor": False,
     # Reading backends: ocr (local, offline), api (multimodal vision API),
     # codex (official app-server image input). Reading and analysis are independent.
     "reading_backend": "ocr", "reading_base_url": "", "reading_model": "",

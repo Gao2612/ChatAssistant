@@ -256,9 +256,13 @@ class SettingsPage(QWidget):
         self.dock_wechat = QCheckBox(
             "停靠微信窗口（会移动/缩放原生微信；默认关闭，推荐镜像预览）")
         self.dock_wechat.setChecked(bool(config.get("dock_wechat", True)))
+        self.background_monitor = QCheckBox(
+            "后台监控其他正常微信窗口（默认关闭，最多 2 个；不移动、不键入）")
+        self.background_monitor.setChecked(bool(config.get("background_monitor", False)))
         model_layout.addWidget(self.auto_connect)
         model_layout.addWidget(self.auto_analysis)
         model_layout.addWidget(self.dock_wechat)
+        model_layout.addWidget(self.background_monitor)
         model_layout.addWidget(label(
             "默认镜像预览：应用窗口怎么缩放都不改变原生微信的大小与位置，微信窗口可自由拖动；"
             "只有勾选“停靠微信窗口”后，应用才会移动/适配原生窗口（此时窗口由应用管理）。", True))
@@ -527,6 +531,7 @@ class SettingsPage(QWidget):
                        auto_connect=self.auto_connect.isChecked(),
                        auto_analysis=self.auto_analysis.isChecked(),
                        dock_wechat=self.dock_wechat.isChecked(),
+                       background_monitor=self.background_monitor.isChecked(),
                        auto_send_allowed=self.auto_send_allowed.isChecked(),
                        reading_backend=self.reading_backend.currentData(),
                        reading_base_url=self.reading_base.text().strip(),
@@ -724,6 +729,13 @@ class MainWindow(QMainWindow):
         self._memory_retriever = None
         self._last_memory_count = 0
         self._last_memory_context = None
+        # T10 background monitoring: opt-in, bounded to two non-active sources.
+        self._source_registry = None
+        self._capture_scheduler = None
+        self._bg_monitor = None
+        self._bg_titles = {}
+        self.bg_timer = QTimer(self)
+        self.bg_timer.timeout.connect(self._poll_background_monitoring)
         self.state = ConversationState()
         self.child = self.stop_event = self.capture_q = None
         self.window_item = None
@@ -1281,6 +1293,75 @@ class MainWindow(QMainWindow):
             warnings.append("未检测到 Codex 应用，Codex 后端将在安装并登录官方 Codex 后可用。")
         self.set_notice("设置已保存。" + (" " + " ".join(warnings) if warnings else ""))
 
+    # ---- T10: opt-in background monitoring for other normal windows ----------
+    def _sync_background_monitoring(self, items):
+        if not self.config.get("background_monitor", False):
+            self._stop_background_monitoring()
+            return
+        try:
+            from .capture_scheduler import CaptureScheduler
+            from .multi_source_monitor import BackgroundSourceMonitor
+            from .source_registry import SourceRegistry, source_from_window
+        except ImportError:
+            return
+        if self._source_registry is None:
+            self._source_registry = SourceRegistry()
+            self._capture_scheduler = CaptureScheduler(self._source_registry)
+            self._bg_monitor = BackgroundSourceMonitor(
+                self._source_registry, self._capture_scheduler)
+        registry = self._source_registry
+        try:
+            registry.discover(self.config.get("wechat_path", ""), include_hidden=False)
+        except OSError:
+            return
+        active = source_from_window(self.window_item) if self.window_item else None
+        try:
+            registry.set_active(active)
+        except ValueError:
+            registry.set_active(None)
+        monitor = self._bg_monitor
+        for info in registry.managed_sources():
+            if info.active or info.window_status != "visible":
+                if monitor.is_running(info.source):
+                    monitor.enable(info.source, False)
+                continue
+            if not monitor.is_running(info.source):
+                monitor.enable(info.source, True)
+        for source in list(monitor.running_sources()):
+            info = registry.get(source)
+            if (info is None or not info.present or info.active
+                    or info.window_status != "visible"):
+                monitor.enable(source, False)
+        if not self.bg_timer.isActive():
+            self.bg_timer.start(400)
+
+    def _poll_background_monitoring(self):
+        monitor = self._bg_monitor
+        if monitor is None:
+            return
+        try:
+            events = monitor.poll()
+        except (OSError, RuntimeError):
+            return
+        for event in events:
+            if event.kind == "snapshot":
+                title = str(event.packet.get("title") or "").strip()
+                if title:
+                    self._bg_titles[event.source] = title
+
+    def _stop_background_monitoring(self):
+        try:
+            self.bg_timer.stop()
+        except RuntimeError:
+            pass
+        monitor = self._bg_monitor
+        if monitor is not None:
+            try:
+                monitor.stop_all()
+            except (OSError, RuntimeError):
+                pass
+        self._bg_titles.clear()
+
     def scan(self):
         try:
             path = self.settings_page.path.text().strip().strip('"')
@@ -1326,6 +1407,7 @@ class MainWindow(QMainWindow):
                     self.set_connection_status("等待微信窗口")
             elif len(items) > 1:
                 self.set_connection_status("发现多个微信窗口")
+        self._sync_background_monitoring(items)
 
     def refresh_windows(self):
         self.last_keys = None
@@ -2560,6 +2642,7 @@ class MainWindow(QMainWindow):
         self.scanner.stop()
         self.poll.stop()
         self.dock_timer.stop()
+        self._stop_background_monitoring()
         if self._inference_queue is not None:
             try:
                 self._inference_queue.stop()
