@@ -101,6 +101,13 @@ flowchart LR
 
 监控范围始终是每个微信窗口当前打开的会话。不会自动切换所有联系人、滚动抓取全部历史或在最小化状态声称持续读取新消息。
 
+### 5.4 实现补充（2026-10-18，T4）
+
+- `window_manager.py` 统一停靠/视图（chat/settings/history/minimized）/健康状态与恢复记录；物理↔DIP 往返误差 ≤2px；弹窗出现时暂停停靠并只读回退；仅在本助手为激活组时修复 Z 序，不循环抢焦点、不 SetParent；登录窗口→主窗口同进程可信接替。
+- `recovery_guard.py` 用 HMAC 签名恢复记录 + 独立守护子进程：主程序异常退出后先验证 exe/PID/启动时刻/HWND 再恢复；正常退出只清理不恢复；原微信关闭/HWND 复用零操作。
+- `discovery.py` 增加 valid_source/classify_window/popup/zorder/foreground/source_kind 与 discover 的 kind/dpi；`window_dock.py` 句柄复用拒绝、2px 容差回滚、弹窗暂停、用户拖动不抢、detach 恢复几何+最小化；`worker.py` 上报 popup/minimized；`main.py` 守护生命周期与 `--recovery-guard` 分流。
+- UI 尚未接入 WindowManager（当前仍用加固后的 WindowDock）；集成由 Lead 在 ui.py 完成。真实输入法/扫码/多开/真实弹窗留 T12。
+
 ## 6. ChatGPT 授权、模型和请求队列
 
 ### 6.1 账号模型
@@ -125,6 +132,13 @@ flowchart LR
 - 兼容/本地 API 配置增加厂商预设（DeepSeek 官方 / OpenRouter / 通义兼容 / 本地 Ollama / 自定义），选择后填入地址、仍可手改；输入地址与 Key 后通过 `GET {base}/models` 读取模型列表并下拉选择，读取结果不落日志。
 - 设置页与聊天页显示“当前分析：<后端> / <模型>”，分析卡片内提供保存入口；ChatGPT 显示已连接账号状态与「断开授权」（只清除该授权，保留其它配置）。T2 的多账号注册生命周期在此之上扩展。
 
+#### 6.2.2 账号服务实现补充（2026-10-18，T2 后端）
+
+- 新增 `account_store.py`：多注册记录（registration_id + host_id/client_id/subject 映射）、DPAPI 加密凭据、单调 revision；写入临时文件 + `os.replace` 原子保存；刷新在锁内重读唯一权威记录并单飞，`save_refreshed` 用 expected_revision CAS 防止旧快照写回旧令牌。
+- `settings.py` 改为账号服务是唯一凭据写者；`subscription.py` 的 `access_token/list_models` 路由账号服务，`sign_in` 保留兼容；旧单账号配置迁移保 client_id/host_id。
+- 权限状态区分 connected / login_only / reauth_required；临时网络错误保留凭据，明确失效清令牌但保留注册映射；退出只影响所选注册并区分已撤销/仅本地退出。
+- **设置 UI 多账号交互尚未集成**（Lead 负责），T12 需完成一次真实安装版授权验收。
+
 
 ### 6.3 通用模型层
 
@@ -148,13 +162,6 @@ ChatGPT 路由继续使用 Responses HTTP 流、`store:false`、`stream:true`，
 - 版本语义：`source_set_version` 与 `memory_version` 在导入/修订/删除时递增；`iter_records(scope, source_version)` 版本不符抛 `StaleSourceVersionError`（fail-closed）；`snapshot(scope)` 冻结来源 ID、版本与 `EvidenceRef` 范围；`delete_source` 同时失效该范围派生记忆。
 - 0.2 迁移：只读校验旧库 → SQLite backup API 受控备份并校验 → 单事务校验数量/顺序/摘要后建 V2 表，旧片段保留 `fragment`；任一步失败回滚且旧库字节不变；未知/更高 schema 版本拒绝写入。
 - UI 调用方只做 T5 最小适配（联系人 userData 用 `ScopeKey`、stats dataclass）；导入任务与进度 UI 由 T6 的 `importers + ImportJobs` 替换。
-
-#### 6.2.2 账号服务实现补充（2026-10-18，T2 后端）
-
-- 新增 `account_store.py`：多注册记录（registration_id + host_id/client_id/subject 映射）、DPAPI 加密凭据、单调 revision；写入临时文件 + `os.replace` 原子保存；刷新在锁内重读唯一权威记录并单飞，`save_refreshed` 用 expected_revision CAS 防止旧快照写回旧令牌。
-- `settings.py` 改为账号服务是唯一凭据写者；`subscription.py` 的 `access_token/list_models` 路由账号服务，`sign_in` 保留兼容；旧单账号配置迁移保 client_id/host_id。
-- 权限状态区分 connected / login_only / reauth_required；临时网络错误保留凭据，明确失效清令牌但保留注册映射；退出只影响所选注册并区分已撤销/仅本地退出。
-- **设置 UI 多账号交互尚未集成**（Lead 负责），T12 需完成一次真实安装版授权验收。
 
 | 数据对象 | 关键字段/用途 |
 | --- | --- |
@@ -185,6 +192,11 @@ ChatGPT 路由继续使用 Responses HTTP 流、`store:false`、`stream:true`，
 HTML 不执行脚本、不取远程资源、不自动打开附件。PDF 保留页号和页内顺序；文字页直接提取，扫描页增加可选本地渲染/OCR 队列，显示页级进度和识别质量。扫描件不能保证恢复微信原始发送时间与发言人；不确定字段保留空值。单文件上限延续 100 MB；超大任务分页处理，可取消后保留完整提交的批次。
 
 同一范围内按文件摘要阻止重复导入；不同文件的重叠记录先标记候选，不仅凭正文删除。只有可靠的导出消息 ID 或明确的序列/时间/发送人证据才能确认跨文件重复。统计应显示是否存在重叠来源。
+
+### 7.2.1 实现补充（2026-10-18，T6）
+
+- 新增 `importers/{base,html_generic,exportwechat_html,pdf}.py` 与 `import_jobs.py`：HTML 纯文本解析（UTF-8/UTF-16/GB18030、不执行脚本/不请求远程、30s/100MB/行数上限、取消）；PDF 用 pypdfium2 受控子进程（150 DPI、每页 ≤1200 万像素、页级 30s 超时记录 issue 后下一页重启续传 ordinal），仅无文字页走本地 OCR，原图只在内存不落盘，损坏/密码页给页级问题；ExportWeChat 目前只做签名探测 + 通用回退，无真实样本时 `SAMPLE_VERIFIED=False`，不标“精确支持”。
+- `history_ui.py` 接入最小导入任务 UI（后台导入、取消、“扫描页本地 OCR”、进度与页级问题）；`requirements.txt` 固定 `pypdfium2>=5.14,<6`，PDFium 许可与 version.json 入 `licenses/pypdfium2/`。frozen 打包需 T11 在 `main.py` 分发 `--lite-pdf-worker`。
 
 ### 7.3 全量模型分析
 

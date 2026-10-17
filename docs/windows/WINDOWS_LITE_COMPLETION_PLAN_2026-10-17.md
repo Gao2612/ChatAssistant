@@ -125,12 +125,14 @@ WindowManager.detach(restore: bool = True) -> None
 WindowManager.capture_health(source: SourceKey) -> CaptureHealth
 ```
 
-- [ ] 用例：句柄复用拒绝操作；助手只恢复自己管理的窗口；已有独立弹窗不被位置循环盖住；跨 DPI 坐标往返误差不超过 2 个物理像素。
-- [ ] 增加外部合成聊天窗口，可产生文本变化、弹窗、resize、最小化与关闭；心跳和静止画面变化分别验证。
-- [ ] 增加遮挡回归：几何完全不变时，在助手与微信之间插入第三个合成窗口，再激活助手；中央必须只露出微信或明确只读回退。单独检查所选 HWND 的捕获帧不能含第三窗口标记；其他应用真正处于前台时不被助手强行覆盖。
-- [ ] 实现登录到聊天主窗的可信接替、事件驱动几何更新、状态区分、故障时只读回退；不调用 SetParent，不用循环激活抢焦点。
-- [ ] 恢复守护只接受原助手创建的恢复记录；主程序异常退出后验证身份再恢复几何；原微信关闭后不能误操作复用 HWND。
-- [ ] 运行 `python -m unittest tests.test_window_dock tests.test_window_manager tests.test_discovery -v`；可见合成测试输出各场景结果，真实微信输入法/扫码在 T12 集中做。
+- [x] 用例：句柄复用拒绝操作；助手只恢复自己管理的窗口；已有独立弹窗不被位置循环盖住；跨 DPI 坐标往返误差不超过 2 个物理像素。
+- [x] 增加外部合成聊天窗口，可产生文本变化、弹窗、resize、最小化与关闭；心跳和静止画面变化分别验证。
+- [x] 增加遮挡回归：几何完全不变时，在助手与微信之间插入第三个合成窗口，再激活助手；中央必须只露出微信或明确只读回退。单独检查所选 HWND 的捕获帧不能含第三窗口标记；其他应用真正处于前台时不被助手强行覆盖。
+- [x] 实现登录到聊天主窗的可信接替、事件驱动几何更新、状态区分、故障时只读回退；不调用 SetParent，不用循环激活抢焦点。
+- [x] 恢复守护只接受原助手创建的恢复记录；主程序异常退出后验证身份再恢复几何；原微信关闭后不能误操作复用 HWND。
+- [x] 运行 `python -m unittest tests.test_window_dock tests.test_window_manager tests.test_discovery -v`；可见合成测试输出各场景结果，真实微信输入法/扫码在 T12 集中做。
+
+> 2026-10-18 完成：`window_manager.py`（停靠/视图/健康/物理↔DIP ≤2px/弹窗只读回退/登录接替/恢复记录）、`recovery_guard.py`（HMAC 恢复记录 + 独立守护子进程，异常退出先验 exe/PID/启动时刻/HWND）、`native_chat_fixture.py` 合成窗口（文本变化/弹窗/resize/最小化/关闭/登录接替）；`discovery/window_dock/worker/main` 加固。定向 100 项通过（含真实窗口三窗口遮挡回归、120DPI、跨进程恢复）；排除并行 WIP 模块 315 项通过；隔离 smoke exit 0。**ui.py 尚未接入 WindowManager（Lead 集成，见 PROGRESS T4-UI）**；真实输入法/扫码/多开留 T12。
 
 ## T5：历史数据 V2 与强制范围校验
 
@@ -168,13 +170,15 @@ ImportJobs.start(scope: ScopeKey, path: Path, enable_page_ocr: bool) -> str
 ImportJobs.progress(job_id: str) -> ImportProgress
 ```
 
-- [ ] 用例：HTML 脚本/远程资源不执行不请求；UTF-8/UTF-16/GB18030 能保留文本；相同连续正文保留；同文件重导不增加记录。
-- [ ] 用例：PDF 页码/顺序准确，混合扫描页只对无文字页 OCR，取消不提交半条记录，损坏/密码页给出页级问题；原图不进入长期日志。
-- [ ] PDF 页面渲染选本地 `pypdfium2`，复用现有 OCR；实施时固定经测试的版本及许可。解析/渲染在受控子进程中进行：文件上限 100 MB，默认渲染 150 DPI、每页最多 1200 万像素，单页解析/OCR 上限 30 秒，超时页记录失败并可单独重试。HTML 解析上限 30 秒；这些上限在配置中集中定义并测试边界。
-- [ ] 使用标准不含 V8/XFA 的发行构建，显式关闭页面/位图句柄；随二进制携带 PDFium 及依赖许可。依据 [pypdfium2 官方说明](https://pypdfium2-team.github.io/pypdfium2/readme.html) 核验所选 wheel 的打包内容。
-- [ ] `exportwechat_html` 只接受能识别的实际格式特征；没有真实导出样本时不启用“精确支持”标记，继续通用回退。取得样本后锁定格式签名和脱敏回归夹具。
-- [ ] 运行 `python -m unittest tests.test_importers tests.test_history_v2 -v`；用 10,000 条合成记录验证首/中/尾引用可跳回原文，并记录导入时长。
+- [x] 用例：HTML 脚本/远程资源不执行不请求；UTF-8/UTF-16/GB18030 能保留文本；相同连续正文保留；同文件重导不增加记录。
+- [x] 用例：PDF 页码/顺序准确，混合扫描页只对无文字页 OCR，取消不提交半条记录，损坏/密码页给出页级问题；原图不进入长期日志。
+- [x] PDF 页面渲染选本地 `pypdfium2`，复用现有 OCR；实施时固定经测试的版本及许可。解析/渲染在受控子进程中进行：文件上限 100 MB，默认渲染 150 DPI、每页最多 1200 万像素，单页解析/OCR 上限 30 秒，超时页记录失败并可单独重试。HTML 解析上限 30 秒；这些上限在配置中集中定义并测试边界。
+- [x] 使用标准不含 V8/XFA 的发行构建，显式关闭页面/位图句柄；随二进制携带 PDFium 及依赖许可。依据 [pypdfium2 官方说明](https://pypdfium2-team.github.io/pypdfium2/readme.html) 核验所选 wheel 的打包内容。
+- [x] `exportwechat_html` 只接受能识别的实际格式特征；没有真实导出样本时不启用“精确支持”标记，继续通用回退。取得样本后锁定格式签名和脱敏回归夹具。
+- [x] 运行 `python -m unittest tests.test_importers tests.test_history_v2 -v`；用 10,000 条合成记录验证首/中/尾引用可跳回原文，并记录导入时长。
 
+
+> 2026-10-18 完成：`importers/{base,html_generic,exportwechat_html,pdf}.py` + `import_jobs.py`；HTML 纯文本/编码/上限/取消，PDF 用 pypdfium2 受控子进程（150 DPI / 每页 ≤1200 万像素 / 页级 30s 超时后下一页重启续传，仅无文字页本地 OCR，原图不落盘），`history_ui.py` 最小导入任务 UI；`requirements.txt` 固定 `pypdfium2>=5.14,<6`，许可与 version.json 入 `licenses/pypdfium2/`。定向 58 项、全套 376 项通过；10,000 条合成记录首/中/尾引用可回原文。**ExportWeChat 无真实样本，SAMPLE_VERIFIED=False，不标精确支持**；frozen 模式的 `--lite-pdf-worker` 分发列入 T11 打包缺口。
 ## T7：可恢复的全量历史模型分析
 
 **Files:** 新建 `liteapp/history_jobs.py`、`history_prompts.py`、`history_analysis_store.py`；使用 T3/T5 接口；新增 `tests/test_history_jobs.py`、`tests/test_history_coverage.py`。
