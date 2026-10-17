@@ -1,4 +1,4 @@
-# T11: isolated install / upgrade / uninstall lifecycle check for a candidate setup.
+﻿# T11: isolated install / upgrade / uninstall lifecycle check for a candidate setup.
 # Scope note: this is a local isolated verification, NOT the clean-VM acceptance from T12.
 param(
     [Parameter(Mandatory = $true)][string]$Setup,

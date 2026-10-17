@@ -270,6 +270,8 @@ CaptureScheduler.activate(source: SourceKey) -> None
 
 ## T12：集中实机验收和交接发布
 
+> 2026-10-18 准备：验收矩阵 [WINDOWS_LITE_ACCEPTANCE_MATRIX.md](WINDOWS_LITE_ACCEPTANCE_MATRIX.md) 与只读证据脚本 [tools/verify_realtime.ps1](../../windows/lite/tools/verify_realtime.ps1) 已创建，**尚未执行任何场景**；候选包与人工项待 T2–T11 合并后填写。
+
 **Files:** 新建 `docs/windows/WINDOWS_LITE_ACCEPTANCE_MATRIX.md`、`windows/lite/tools/verify_realtime.ps1`；更新 README、AGENTS、AGENT_HANDOFF、版本记录。
 
 - [ ] 运行全套逻辑/假服务/Qt/合成窗口测试，填写测试环境、依赖版本和输出。无执行权限的用例写“未运行”，不写“通过”。
