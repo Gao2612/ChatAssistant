@@ -34,7 +34,7 @@
 | T4-UI 接 WindowManager | 🟡 Lead 待做 | ui.py 用 WindowManager.sync/set_view/on_activated/capture_health + record_* 新鲜度，替换直接 WindowDock 调用 |
 | T5 历史 V2/迁移 | ✅ 2026-10-18 完成，commit `8dfcecc` | `history_models.py`、`history_migrations.py`、V2 `history.py`；强制 ScopeKey/版本语义/事务迁移/DPAPI；历史定向 38 项、排除 T4 线的全模块 199 项通过 |
 | T6 导入器 | ✅ 2026-10-18 完成，commit `214b6fe` | importers/ + import_jobs.py + history_ui 最小导入 UI；pypdfium2 固定版本与许可入库；定向 58 项、全套 376 项通过；ExportWeChat 无真实样本 |
-| T7 全量历史模型分析 | 🟡 队友 inference 实现中（task-11） | `history_jobs.py`/`history_prompts.py`/`history_analysis_store.py`；依赖 T3 网关与 T5 store（均已完成） |
+| T7 全量历史模型分析 | ✅ 2026-10-18 完成，commit 待记 | history_jobs/prompts/analysis_store；定向 37、全套 459 项通过；合成真实 job 覆盖率 1.0/7 证据回读；设置模型 V4.1-Flash-1017 被 DeepSeek 400 拒绝（真实分析前需改选 deepseek-flash 等） |
 | T8 档案/趋势/统计/任务界面 | 🟡 队友 history 实现中（task-12） | `history_statistics.py`/`profile_ui.py` + history_ui/report；T7 report 联调待接 |
 | T9 记忆检索与实时建议整合 | 🟡 Lead 前半实现中（task-16，不碰 ui.py） | `conversation_binding.py`/`memory_retrieval.py`/`realtime.py`；ui.py/analysis.py 集成待 T4-UI 释放后 |
 | T10 多微信来源调度 | ⏳ 未开始（Lead，依赖 T9） | `source_registry.py`/`capture_scheduler.py` |

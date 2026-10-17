@@ -196,12 +196,14 @@ HistoryJobs.report(scope: ScopeKey, source_version: int) -> HistoryReport
 
 `JobProgress` 必须包含成功记录数、字符范围覆盖率、待办/失败批次、解析缺页数；输出 fact/inference/open_question 三类内容，证据是 T1 EvidenceRef。
 
-- [ ] 用例：长记录跨批切片全部覆盖且重叠不重计；首、中、尾植入的事实都能进入对应批次；报告无证据引用被拒收。
-- [ ] 用例：第 3 批失败后重启只恢复未完成部分；删除来源使旧汇总失效；同文件重导不产生新模型任务；模型版本变化不复用旧分析缓存。
-- [ ] 实现 12288 字节正文批次、最多 2 条/2048 字节重叠、32768 字节请求上限和分层合并；上下文超限缩小批次并保留原引用偏移。
-- [ ] 批次提交采用事务，只有完成和校验通过才记录成功；流中断不“补齐”覆盖率。任务启动明确固定所选来源范围及模型，增量自动分析使用档案级设置。
-- [ ] 运行 `python -m unittest tests.test_history_jobs tests.test_history_coverage -v`；用假模型确定性核对覆盖，再用少量合成历史做实际服务验收。
+- [x] 用例：长记录跨批切片全部覆盖且重叠不重计；首、中、尾植入的事实都能进入对应批次；报告无证据引用被拒收。
+- [x] 用例：第 3 批失败后重启只恢复未完成部分；删除来源使旧汇总失效；同文件重导不产生新模型任务；模型版本变化不复用旧分析缓存。
+- [x] 实现 12288 字节正文批次、最多 2 条/2048 字节重叠、32768 字节请求上限和分层合并；上下文超限缩小批次并保留原引用偏移。
+- [x] 批次提交采用事务，只有完成和校验通过才记录成功；流中断不“补齐”覆盖率。任务启动明确固定所选来源范围及模型，增量自动分析使用档案级设置。
+- [x] 运行 `python -m unittest tests.test_history_jobs tests.test_history_coverage -v`；用假模型确定性核对覆盖，再用少量合成历史做实际服务验收。
 
+
+> 2026-10-18 完成：`history_prompts.py`/`history_analysis_store.py`/`history_jobs.py`；确定性分批（12288B/重叠 2 条 2048B/请求 32768B）、覆盖率并集、批次事务与断点、分层 reduce、证据二次校验；定向 37 项、全套 459 项通过；合成历史真实 job 覆盖率 1.0、7 证据回读。**history_ui 接入由 T8 做；当前设置模型名 V4.1-Flash-1017 被 DeepSeek 400 拒绝，真实分析前需改选 deepseek-flash 等受支持模型。**
 ## T8：档案、趋势、统计与任务界面
 
 **Files:** 新建 `liteapp/profile_ui.py`、`liteapp/history_statistics.py`；改 `history_ui.py`、`history_report.py`；新增 `tests/test_profile_ui.py`、`tests/test_history_statistics.py`。

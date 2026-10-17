@@ -212,6 +212,12 @@ HTML 不执行脚本、不取远程资源、不自动打开附件。PDF 保留�
 
 用户看到的档案包括：明确表达的需求与偏好、已承诺事项、未解决问题、沟通方式和可核对的时间线。关系趋势展示话题/互动频率/阶段变化以及原文依据；发送人和时间字段不足时不计算回复时延或双方主动比例。模型倾向解释标为推断，不做没有证据的心理或人格定性。
 
+#### 7.3.1 实现补充（2026-10-18，T7）
+
+- 新增 `history_prompts.py`（history-v1 提示词，聊天记录作为不可信数据）、`history_analysis_store.py`（独立加密 SQLite：analysis_jobs/batches/records/items/reports，事务提交与断点状态）、`history_jobs.py`（`HistoryJobs.start/pause/resume/cancel/progress/report/wait/run_pending`；确定性 `plan_batches`：正文 ≤12288 字节、重叠 ≤2 条/2048 字节、请求 ≤32768 字节，超限缩批不丢记录；`coverage_from_batches` 并集不重计；分层 reduce；发布前证据二次校验）。
+- `JobProgress` 含成功记录数、字符覆盖率、待办/失败批次、解析缺页数；`HistoryReport`/`ReportItem` 的每条结论携带 T1 `EvidenceRef`，可用 `store.read_evidence()` 回读；删除/重导来源使旧报告抛 `StaleSourceVersionError`。
+- 真实合成历史验收：1 个 job、2/2 记录、覆盖率 1.0、4 fact/1 inference/1 open_question、7 条证据全部回读（仅合成数据）。当前设置里的兼容 API 模型名 `V4.1-Flash-1017` 被 DeepSeek 拒绝（支持 `deepseek-flash` 等），真实聊天分析前需在设置中改选受支持模型。
+
 ### 7.4 让实时回复真正用到记忆
 
 在右侧档案入口为当前会话关联联系人。窗口标题只能作为候选提示，不能作为唯一 ID。当前会话发生可观测变化、窗口重启或绑定不确定时停用旧关联；用户确认后恢复。无法可靠区别同名会话时宁可只分析当前文字，界面清楚显示未关联，不能偷偷选一个同名联系人。
