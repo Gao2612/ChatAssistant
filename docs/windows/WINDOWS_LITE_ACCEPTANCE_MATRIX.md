@@ -67,3 +67,12 @@
 - [ ] 仓库无密钥/令牌/真实聊天；`_reports` 与 `test-output` 未进入安装包。
 - [ ] README、AGENTS、AGENT_HANDOFF、设计、计划、PROGRESS 与本矩阵一致。
 - [ ] 安装包、便携包、校验清单、发布说明齐备；提交/发布需用户明确授权。
+
+### 候选包 0.4.1（2026-10-18）
+
+- 版本：0.4.1
+- 安装包：`windows/lite/dist-release/ChatAssistantLite-Setup.exe`
+- SHA-256：`F8EC437C5E467DDCEC6EA789CC9F1818A7F4C86E42ED89CD2DA604D69D2DC69E`
+- Git：`1ac27d7`（feat/windows-lite，构建时 clean）
+- 已自动验证：`--version-json`（0.4.1 + source digest）、隔离 `--self-test` exit 0、`--smoke` ×3 exit 0、`tools/verify_install.ps1` 隔离安装/自检/卸载/保留数据 `ok=true`
+- 真实微信场景：按本矩阵逐项运行后填写；未运行不写“通过”。
