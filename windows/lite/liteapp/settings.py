@@ -155,6 +155,26 @@ def save(config, folder=None):
         write_raw(saved, dest)
 
 
+MODEL_MEMORY_FIELDS = ("chatgpt_model", "api_model", "local_model", "codex_model")
+
+
+def remember_model(field, value, folder=None):
+    """Persist only the per-backend model choice without touching credentials.
+
+    Used when the user picks a model in the UI so the choice survives a restart even
+    if they never click 保存设置 while that backend is active.
+    """
+    if field not in MODEL_MEMORY_FIELDS:
+        raise ValueError("unknown model field")
+    dest = Path(folder) if folder is not None else data_dir()
+    from . import account_store
+    with account_store.folder_lock(dest):
+        raw = read_raw(dest) or {}
+        raw[field] = str(value)
+        write_raw(raw, dest)
+    return str(value)
+
+
 def save_subscription(subscription, folder=None):
     """Update only identity metadata for the active registration (legacy helper).
 

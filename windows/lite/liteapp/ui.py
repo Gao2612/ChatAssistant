@@ -179,6 +179,7 @@ class SettingsPage(QWidget):
     models_done = Signal(object, str)
     disconnect_requested = Signal()
     account_action = Signal(str, str)
+    model_remembered = Signal(str)
 
     def __init__(self, config, parent=None):
         super().__init__(parent)
@@ -268,6 +269,7 @@ class SettingsPage(QWidget):
         self.key.setEchoMode(QLineEdit.EchoMode.Password)
         self.model = NoWheelComboBox()
         self.model.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.model.currentIndexChanged.connect(self._remember_model_choice)
         self.fetch_models_button = QPushButton("读取模型列表")
         self.fetch_models_button.clicked.connect(self.fetch_models)
         self.model_row = QHBoxLayout()
@@ -589,6 +591,20 @@ class SettingsPage(QWidget):
         elif models:
             self.model.setCurrentIndex(0)
 
+    def _remember_model_choice(self, _index=0):
+        """Persist the ChatGPT model the moment the user picks it.
+
+        Other backends keep their model in the editable text of the same combo, so
+        only the ChatGPT catalog selection is remembered here.
+        """
+        if self.backend.currentData() != "chatgpt":
+            return
+        slug = self.model.currentData()
+        if not slug:
+            return
+        self.config["chatgpt_model"] = str(slug)
+        self.model_remembered.emit(str(slug))
+
     def commit(self):
         try:
             backend = self.backend.currentData()
@@ -789,7 +805,7 @@ class MainWindow(QMainWindow):
     def __init__(self, config=None, scanning=True, window_manager=None, account_store=None,
                  inference_queue=None):
         super().__init__()
-        self.setWindowTitle("微信实时助手 · 便捷版 0.5.4")
+        self.setWindowTitle("微信实时助手 · 便捷版 0.5.5")
         self.resize(1000, 520)
         self.setMinimumSize(900, 500)
         self.setStyleSheet(STYLE)
@@ -1011,6 +1027,7 @@ class MainWindow(QMainWindow):
 
         self.settings_page = SettingsPage(self.config)
         self.settings_page.saved.connect(self.settings_saved)
+        self.settings_page.model_remembered.connect(self.remember_chatgpt_model)
         self.settings_page.cancel_requested.connect(self.show_chat)
         self.settings_page.disconnect_requested.connect(self.disconnect_chatgpt)
         self._account_action_slot = self._on_account_action
@@ -1349,6 +1366,15 @@ class MainWindow(QMainWindow):
     def set_notice(self, text):
         self.notice.setText(text)
         self.settings_page.status.setText(text)
+
+    def remember_chatgpt_model(self, slug):
+        """Persist the ChatGPT model selection immediately (bug 4: model memory)."""
+        self.config["chatgpt_model"] = str(slug)
+        try:
+            settings.remember_model("chatgpt_model", slug)
+        except (OSError, ValueError, TypeError):
+            return
+        self.refresh_effective_model()
 
     def settings_saved(self, config):
         path_changed = self.config.get("wechat_path") != config.get("wechat_path")
