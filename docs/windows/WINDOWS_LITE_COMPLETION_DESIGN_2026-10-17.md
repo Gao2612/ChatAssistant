@@ -228,6 +228,16 @@ HTML 不执行脚本、不取远程资源、不自动打开附件。PDF 保留�
 
 ## 8. 界面完成形态
 
+### 8.2 用户补充需求（2026-10-18 晚）
+
+- 安装包界面文字中文化：内置简体中文 Inno Setup 语言文件，向导/卸载/任务/启动描述中文，英文作为回退语言。
+- 设置下拉禁止滚轮误改（已确认 0.4.0 无残留）：`NoWheelComboBox`。
+- 回复风格从单一文本扩展为多预设（自然简短/专业正式/亲切热情/直接干脆/幽默轻松/高情商委婉/商务谈判/温柔耐心/简洁书面），仍可手写自定义。
+- 微信隐藏到托盘/任务栏后项目应能发现窗口；已有微信进程时绝不重复启动新实例，用户显式点击时恢复已有窗口（不抢焦点、不 SetParent）。
+- 通过分析已导入 HTML/PDF 中“我”的发言生成专属回复风格：本地可解释特征 + 300–600 字风格说明，按 ScopeKey 加密派生存储，来源删除/记忆版本变化后失效；设置页选用。
+- 全部功能与验收完成后，按 10 个设计/前端 Skills 重构 PySide6 界面（frontend-design、ui-ux-pro-max、impeccable、web-design-guidelines、theme-factory、canvas-design、web-artifacts-builder、brand-guidelines、react-best-practices、webapp-testing；React/Next 条目只取可迁移原则）。
+
+
 > 2026-10-18 用户补充：T1–T12 与验收完成后，按 10 个设计/前端 Skills（frontend-design、ui-ux-pro-max、impeccable、web-design-guidelines、theme-factory、canvas-design、web-artifacts-builder、brand-guidelines、react-best-practices、webapp-testing）重构本项目 UI。PySide6 桌面界面采用其中的布局/字体/配色/可访问性/动效原则；React/Next 与 web-artifacts 条目只取可迁移的交互与结构原则。
 
 ### 8.1 实现补充（2026-10-18，T8）
