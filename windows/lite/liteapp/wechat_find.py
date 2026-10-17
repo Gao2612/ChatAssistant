@@ -136,28 +136,51 @@ def find_conversation(window, title, *, backend=None, capture=None, reader=None,
                        if row[0].strip() in ("搜索", "Q搜索") or row[0].endswith("搜索")]
         if not search_rows:
             return fail("search_not_found")
-        _text, x0, y0, x1, y1 = search_rows[0]
-        backend.click(hwnd, (x0 + x1) // 2, (y0 + y1) // 2)
+        _text, sx0, sy0, sx1, sy1 = search_rows[0]
         steps.append("paste_title")
-        backend.key_combo((wa.VK_CONTROL, wa.VK_A))
-        if not backend.set_clipboard_text(title):
-            return fail("clipboard_failed")
-        backend.key_combo((wa.VK_CONTROL, wa.VK_V))
-        time.sleep(settle)
-        steps.append("click_result")
         candidates = []
-        for _attempt in range(3):
-            captured = capture(hwnd)
-            if captured is None:
-                time.sleep(0.4)
-                continue
-            frame, width, height = captured
-            sidebar = frame[:, :max(1, int(width * 0.32))]
-            candidates = [row for row in _ocr_rows(reader, sidebar)
-                          if title in row[0] and row[2] > 90]
+        for attempt in range(2):
+            if attempt:
+                # A transient overlay/focus state can swallow the first paste;
+                # close it and repeat the search interaction once.
+                try:
+                    backend.key_combo((0x1B,))
+                except (OSError, RuntimeError):
+                    pass
+                time.sleep(0.3)
+                captured = capture(hwnd)
+                if captured is None:
+                    continue
+                frame, width, _height = captured
+                sidebar = frame[:, :max(1, int(width * 0.32))]
+                rows = _ocr_rows(reader, sidebar)
+                search_rows = [row for row in rows
+                               if row[0].strip() in ("搜索", "Q搜索")
+                               or row[0].endswith("搜索")]
+                if not search_rows:
+                    continue
+                _text, sx0, sy0, sx1, sy1 = search_rows[0]
+            backend.click(hwnd, (sx0 + sx1) // 2, (sy0 + sy1) // 2)
+            backend.key_combo((wa.VK_CONTROL, wa.VK_A))
+            if not backend.set_clipboard_text(title):
+                return fail("clipboard_failed")
+            backend.key_combo((wa.VK_CONTROL, wa.VK_V))
+            time.sleep(settle + attempt * 0.35)
+            steps.append("click_result")
+            for _frame_attempt in range(4):
+                captured = capture(hwnd)
+                if captured is None:
+                    time.sleep(0.4)
+                    continue
+                frame, width, height = captured
+                sidebar = frame[:, :max(1, int(width * 0.32))]
+                candidates = [row for row in _ocr_rows(reader, sidebar)
+                              if title in row[0] and row[2] > 90]
+                if candidates:
+                    break
+                time.sleep(0.5)
             if candidates:
                 break
-            time.sleep(0.6)
         if not candidates:
             return fail("result_not_found")
         _text, x0, y0, x1, y1 = candidates[0]

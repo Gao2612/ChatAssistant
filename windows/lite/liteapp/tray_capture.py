@@ -25,6 +25,7 @@ SW_SHOWNOACTIVATE = 4
 SW_MINIMIZE = 6
 SWP_NOZORDER = 0x0004
 SWP_NOACTIVATE = 0x0010
+SWP_HIDEWINDOW = 0x0080
 OFFSCREEN_X = -30000
 
 
@@ -111,8 +112,12 @@ def capture_hidden_window(window, *, settle: float = 0.85,
         ink = float((image.max(axis=2) > 16).mean())
         return image if ink >= minimum_ink else None
     finally:
-        _u32.ShowWindow(hwnd, SW_HIDE)
+        # Restore geometry and hide atomically: a separate ShowWindow(SW_HIDE) can
+        # be intercepted by WeChat's tray state machine. Verify and hide again if
+        # the window became visible during the off-screen render.
         _u32.SetWindowPos(hwnd, 0, left, top, width, height,
-                          SWP_NOZORDER | SWP_NOACTIVATE)
+                          SWP_NOZORDER | SWP_NOACTIVATE | SWP_HIDEWINDOW)
+        if _u32.IsWindowVisible(hwnd):
+            _u32.ShowWindow(hwnd, SW_HIDE)
         if was_minimized:
             _u32.ShowWindow(hwnd, SW_MINIMIZE)
