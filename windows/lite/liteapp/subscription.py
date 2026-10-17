@@ -1,4 +1,12 @@
-"""OpenAI Sign in with ChatGPT (local OSS ChatGPT plan usage flow)."""
+"""OpenAI Sign in with ChatGPT (local OSS ChatGPT plan usage flow).
+
+Credential ownership lives in :mod:`liteapp.account_store` (T2): registrations,
+refresh single-flight, compare-and-swap persistence and sign-out are handled there.
+This module keeps the wire details of the official flow (browser PKCE + loopback
+callback + token exchange + identity verification) and the Responses API stream, and
+routes any settings dict that carries a ``registration_id`` through the account
+service instead of mutating its own snapshot copy of the credentials.
+"""
 import base64
 import hashlib
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -12,12 +20,11 @@ import webbrowser
 import urllib.error
 import urllib.request
 
+from .account_store import (AUTH_BASE, AUTHORIZATION_PATH, API_BASE, RESOURCE,
+                            SCOPE_DIRECT, SCOPES, TOKEN_PATH, authorize_params)
 from .analysis import NoRedirectHandler, parse_result, build_payload
+from .contracts import CancellationToken
 
-AUTH_BASE = "https://auth.openai.com"
-API_BASE = "https://api.openai.com/v1"
-RESOURCE = API_BASE
-SCOPES = "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct"
 ISSUER = AUTH_BASE
 JWKS_URL = AUTH_BASE + "/.well-known/jwks.json"
 _refresh_lock = threading.Lock()
@@ -99,7 +106,12 @@ def wait_for_callback(server, seconds=900):
 
 
 def sign_in(host_id, current=None, on_registration=None):
-    """Open the official browser flow; return one fully validated credential record."""
+    """Open the official browser flow; return one fully validated credential record.
+
+    Kept as the blocking compatibility path for the current settings UI. New code
+    should use :class:`liteapp.account_store.AuthAttempt`, which owns the persistent
+    registration and supports cancellation/transaction expiry.
+    """
     if not host_id.startswith(("urn:uuid:", "urn:ietf:params:oauth:jwk-thumbprint:", "did:key:")):
         raise ValueError("本机授权标识无效，请重新启动登录。")
     server = HTTPServer(("127.0.0.1", 0), _CallbackHandler)
@@ -108,25 +120,20 @@ def sign_in(host_id, current=None, on_registration=None):
     redirect_uri = f"http://127.0.0.1:{port}/auth/callback"
     state, nonce = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
     verifier = _b64url(secrets.token_bytes(48))
-    challenge = _b64url(hashlib.sha256(verifier.encode("ascii")).digest())
     issued_client = (current or {}).get("client_id")
-    params = {
-        "client_id": issued_client or "dynamic_agent_client",
-        "response_type": "code", "redirect_uri": redirect_uri,
-        "scope": SCOPES, "resource": RESOURCE,
-        "state": state, "nonce": nonce,
-        "code_challenge_method": "S256", "code_challenge": challenge,
-        "ext_agent_host_id": host_id,
-    }
-    if issued_client:
-        if (current or {}).get("id_token"):
-            params["id_token_hint"] = current["id_token"]
-        if (current or {}).get("email"):
-            params["login_hint"] = current["email"]
-    else:
-        params["agent_name_hint"] = "ChatAssistant Windows"
+    params = authorize_params(
+        host_id=host_id,
+        client_id=issued_client or "dynamic_agent_client",
+        redirect_uri=redirect_uri,
+        state=state,
+        nonce=nonce,
+        verifier=verifier,
+        id_token_hint=(current or {}).get("id_token", "") if issued_client else "",
+        login_hint=(current or {}).get("email", "") if issued_client else "",
+        agent_name_hint="" if issued_client else "ChatAssistant Windows",
+    )
     try:
-        url = AUTH_BASE + "/api/accounts/authorize?" + urlencode(params)
+        url = AUTH_BASE + AUTHORIZATION_PATH + "?" + urlencode(params)
         if not webbrowser.open(url):
             raise ValueError("无法打开系统浏览器，请检查默认浏览器设置。")
         callback = wait_for_callback(server)
@@ -144,13 +151,15 @@ def sign_in(host_id, current=None, on_registration=None):
         raise ValueError("ChatGPT 登录没有返回有效授权，请重试。")
     if not issued_client and on_registration is not None:
         on_registration(client_id)
-    token = _request(AUTH_BASE + "/api/accounts/oauth/token", data=urlencode({
+    token = _request(AUTH_BASE + TOKEN_PATH, data=urlencode({
         "grant_type": "authorization_code", "client_id": client_id,
         "code": code, "code_verifier": verifier,
         "redirect_uri": redirect_uri, "resource": RESOURCE,
     }).encode("ascii"), timeout=30)
     scopes = str(token.get("scope", "")).split()
-    if "chatgpt.tokens.use.direct" not in scopes:
+    if SCOPE_DIRECT not in scopes:
+        # Identity is valid but the account did not grant plan usage; the account
+        # service stores this state as "login only" instead of discarding it.
         raise ValueError("此 ChatGPT 登录没有授予套餐使用权限。请重新连接并同意该权限。")
     id_token = token.get("id_token", "")
     identity = _verify_identity(id_token, client_id, nonce)
@@ -166,13 +175,24 @@ def sign_in(host_id, current=None, on_registration=None):
     }
 
 
-def access_token(config):
+def _account_store_for(config):
+    """The account service that owns this settings dict, when it has a registration."""
+    registration_id = config.get("registration_id") or config.get("active_registration_id")
+    if not registration_id:
+        return None, None
+    from .account_store import AccountStore
+    folder = config.get("_data_dir")
+    return (AccountStore(folder) if folder else AccountStore()), registration_id
+
+
+def _legacy_access_token(config):
+    """Read-only fallback for in-memory configs without a persistent registration."""
     session = config.get("subscription")
     if not session or not session.get("access_token") or not session.get("refresh_token"):
         raise ValueError("请先点击“Continue with ChatGPT”并完成套餐授权。")
     with _refresh_lock:
         if float(session.get("access_expires_at", 0)) <= time.time() + 60:
-            refreshed = _request(AUTH_BASE + "/api/accounts/oauth/token", data=urlencode({
+            refreshed = _request(AUTH_BASE + TOKEN_PATH, data=urlencode({
                 "grant_type": "refresh_token", "client_id": session["client_id"],
                 "refresh_token": session["refresh_token"], "resource": RESOURCE,
             }).encode("ascii"), timeout=30)
@@ -181,17 +201,35 @@ def access_token(config):
                 "refresh_token": refreshed.get("refresh_token", session["refresh_token"]),
                 "access_expires_at": time.time() + int(refreshed.get("expires_in", 3600)),
             })
-            # settings.save encrypts the credential record with Windows DPAPI.
-            from .settings import save_subscription
-            save_subscription(session)
-        if "chatgpt.tokens.use.direct" not in session.get("scopes", []):
+        if SCOPE_DIRECT not in session.get("scopes", []):
             raise ValueError("当前授权未包含 ChatGPT 套餐使用权限，请重新连接。")
         return session["access_token"]
 
 
+def access_token(config):
+    """Return a bearer token; refreshes through the single account-service writer."""
+    store, registration_id = _account_store_for(config)
+    if store is not None and registration_id:
+        return store.access_token(registration_id, CancellationToken())
+    return _legacy_access_token(config)
+
+
+def _remember_model_catalog(config, models):
+    """Best-effort model catalog version bump for the active registration."""
+    store, registration_id = _account_store_for(config)
+    if store is None or not registration_id:
+        return
+    try:
+        store.update_model_catalog(registration_id, models)
+    except (OSError, ValueError, TypeError):
+        return  # A concurrent account edit must not break a model refresh.
+
+
 def list_models(config):
     data = _request(API_BASE + "/models", access_token=access_token(config), timeout=30)
-    return model_catalog(data)
+    models = model_catalog(data)
+    _remember_model_catalog(config, models)
+    return models
 
 
 def model_catalog(data):

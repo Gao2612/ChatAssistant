@@ -149,6 +149,13 @@ ChatGPT 路由继续使用 Responses HTTP 流、`store:false`、`stream:true`，
 - 0.2 迁移：只读校验旧库 → SQLite backup API 受控备份并校验 → 单事务校验数量/顺序/摘要后建 V2 表，旧片段保留 `fragment`；任一步失败回滚且旧库字节不变；未知/更高 schema 版本拒绝写入。
 - UI 调用方只做 T5 最小适配（联系人 userData 用 `ScopeKey`、stats dataclass）；导入任务与进度 UI 由 T6 的 `importers + ImportJobs` 替换。
 
+#### 6.2.2 账号服务实现补充（2026-10-18，T2 后端）
+
+- 新增 `account_store.py`：多注册记录（registration_id + host_id/client_id/subject 映射）、DPAPI 加密凭据、单调 revision；写入临时文件 + `os.replace` 原子保存；刷新在锁内重读唯一权威记录并单飞，`save_refreshed` 用 expected_revision CAS 防止旧快照写回旧令牌。
+- `settings.py` 改为账号服务是唯一凭据写者；`subscription.py` 的 `access_token/list_models` 路由账号服务，`sign_in` 保留兼容；旧单账号配置迁移保 client_id/host_id。
+- 权限状态区分 connected / login_only / reauth_required；临时网络错误保留凭据，明确失效清令牌但保留注册映射；退出只影响所选注册并区分已撤销/仅本地退出。
+- **设置 UI 多账号交互尚未集成**（Lead 负责），T12 需完成一次真实安装版授权验收。
+
 | 数据对象 | 关键字段/用途 |
 | --- | --- |
 | `wechat_accounts` | UUID、加密标签、旧账号映射；不冒称获取到了微信内部账号 ID |
