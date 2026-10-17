@@ -126,3 +126,10 @@
 - D-UI：哑光纸 + 青瓷设计系统；窗口 1000×520 / 最小 900×500，小屏（1536×864@150%）下内容完整显示；状态行（连接/后端/模型/分析）可见；AI 建议拨片、只读提示、占位 Key 警告可见
 - 全量测试 660 项 exit 0（含 3 项设计系统测试）
 - 真实微信场景（连接、托盘、自动查找、发送、弹窗/双窗口）仍按 T12 人工逐项验收；本候选包不含未提交改动
+### 候选包 0.5.3（D-UI 最终候选，2026-10-18）
+
+- 版本 0.5.3；安装包 SHA-256 `00946EDF830E1A1D9A936A01E01592DE1D60A83205465F7400FD943CA3EDA549`
+- Git `6d40c4a`（clean）、126 个源文件；`--version-json` 0.5.3；隔离 `--self-test` exit 0；`--smoke` exit 0；`package.ps1 -VerifyInstall` install/self-test/uninstall/保留数据 `ok=true`；已覆盖安装到 `E:\ChatAssistantLite`
+- D-UI：状态行单行可见（连接状态 / 后端+模型 / 分析状态）；1000×520 窗口 / 900×500 最小，小屏不裁切；截图见 `windows/lite/test-output/final-chat.png`
+- 全量 660 项测试 exit 0
+- 人工 T12 清单见 `docs/windows/T12_MANUAL_ACCEPTANCE_HANDOFF_2026-10-18.md`
