@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QPlainTextEdit, QLineEdit, QComboBox, QCheckBox, QFormLayout,
     QFileDialog, QGroupBox, QScrollArea, QMessageBox,
-    QFrame, QStackedWidget, QToolButton,
+    QFrame, QStackedWidget, QToolButton, QDialog,
 )
 from . import settings
 from .analysis import analyze
@@ -274,6 +274,13 @@ class SettingsPage(QWidget):
         effective_row.addWidget(self.effective_label, 1)
         effective_row.addWidget(self.card_save_button)
         model_layout.addLayout(effective_row)
+        style_row = QHBoxLayout()
+        self.style_profile_button = QPushButton("从聊天记录生成专属风格")
+        self.style_profile_status = label(
+            "先在历史页导入聊天记录并选择当前联系人，再生成专属风格。", True)
+        style_row.addWidget(self.style_profile_button)
+        style_row.addWidget(self.style_profile_status, 1)
+        model_layout.addLayout(style_row)
         body.addWidget(model_group)
 
         codex_group = QGroupBox("Codex 账户（读取与分析的共用选项）")
@@ -566,11 +573,49 @@ class SettingsPage(QWidget):
 SettingsDialog = SettingsPage
 
 
+class StyleProfileDialog(QDialog):
+    """Show the generated style report and let the user adopt the prompt style."""
+
+    def __init__(self, profile, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("专属回复风格（从已导入聊天记录生成）")
+        self.resize(760, 560)
+        layout = QVBoxLayout(self)
+        summary = (f"样本：{getattr(profile, 'sample_count', 0)} 条"
+                   f"（消息 {getattr(profile, 'message_count', 0)} / "
+                   f"片段 {getattr(profile, 'fragment_count', 0)}），"
+                   f"来源 {getattr(profile, 'sources_with_me', 0)} 个。"
+                   "以下内容由本地统计推断，不代表事实，也不会跨联系人使用。")
+        layout.addWidget(label(summary, True))
+        layout.addWidget(label("用户风格报告（给用户看）"))
+        report = QPlainTextEdit()
+        report.setReadOnly(True)
+        report.setPlainText(getattr(profile, "display_report", "") or "")
+        layout.addWidget(report, 1)
+        layout.addWidget(label("模型提示词风格（选用后用于生成建议）"))
+        prompt = QPlainTextEdit()
+        prompt.setReadOnly(True)
+        prompt.setMaximumHeight(120)
+        prompt.setPlainText(getattr(profile, "prompt_style", "") or "")
+        layout.addWidget(prompt)
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
+        close_button = QPushButton("关闭")
+        close_button.clicked.connect(self.reject)
+        apply_button = QPushButton("选用此风格")
+        apply_button.setObjectName("primary")
+        apply_button.clicked.connect(self.accept)
+        buttons.addWidget(close_button)
+        buttons.addWidget(apply_button)
+        layout.addLayout(buttons)
+
+
 class ResultBus(QObject):
     done = Signal(object, object, str)
     subscription_done = Signal(object, object, str)
     read_done = Signal(object, object, str)
     account_done = Signal(str, object, str)
+    style_done = Signal(str, object, str)
     queue_event = Signal(object)
 
 
@@ -652,6 +697,8 @@ class MainWindow(QMainWindow):
         self.config = config if config is not None else settings.load()
         self._account_store = account_store
         self.account_busy = False
+        self._style_profile = None
+        self.style_busy = False
         self.state = ConversationState()
         self.child = self.stop_event = self.capture_q = None
         self.window_item = None
@@ -692,6 +739,7 @@ class MainWindow(QMainWindow):
         self.bus.subscription_done.connect(self.subscription_done)
         self.bus.read_done.connect(self.reading_done)
         self.bus.account_done.connect(self.account_action_done)
+        self.bus.style_done.connect(self.style_profile_done)
         self._queue_action_slot = self._run_queue_action
         self.bus.queue_event.connect(self._queue_action_slot)
         # T3-UI: one global in-flight model request, latest-frame-only per scope.
@@ -823,6 +871,8 @@ class MainWindow(QMainWindow):
         self.settings_page.disconnect_requested.connect(self.disconnect_chatgpt)
         self._account_action_slot = self._on_account_action
         self.settings_page.account_action.connect(self._account_action_slot)
+        self.settings_page.style_profile_button.clicked.connect(
+            self.generate_style_profile)
         self.settings_page.set_accounts(self.config.get("registrations") or [])
         self.refresh_effective_model()
         self.page_stack.addWidget(self.settings_page)
@@ -1611,6 +1661,67 @@ class MainWindow(QMainWindow):
 
     def refresh_effective_model(self):
         self.effective_label.setText("分析：" + backends.describe_analysis(self.config))
+
+    def generate_style_profile(self):
+        if self.style_busy:
+            return
+        scope = self.history_page.current_scope()
+        if scope is None:
+            self.set_notice("请先在历史页导入聊天记录并选择当前联系人，再生成专属风格。")
+            self.settings_page.style_profile_status.setText(
+                "尚未选择联系人：请先到历史页导入并选中当前联系人。")
+            return
+        store = self.history_page.store
+        self.style_busy = True
+        self.settings_page.style_profile_button.setEnabled(False)
+        self.settings_page.style_profile_status.setText("正在分析已导入聊天记录…")
+
+        def work():
+            try:
+                from .style_profile import StyleProfileBuilder
+                profile = StyleProfileBuilder(store).save(scope)
+                self.bus.style_done.emit("build", profile, "")
+            except Exception as exc:  # noqa: BLE001 - UI thread reports the message
+                self.bus.style_done.emit(
+                    "build", None,
+                    str(exc) if isinstance(exc, ValueError)
+                    else "生成专属风格失败，请稍后重试。")
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def style_profile_done(self, _action, profile, error):
+        self.style_busy = False
+        self.settings_page.style_profile_button.setEnabled(True)
+        if error or profile is None:
+            self.settings_page.style_profile_status.setText(error or "生成失败，请重试。")
+            return
+        self._style_profile = profile
+        self.settings_page.style_profile_status.setText(
+            f"已生成：样本 {getattr(profile, 'sample_count', 0)} 条、"
+            f"来源 {getattr(profile, 'sources_with_me', 0)} 个。"
+            "可查看报告并选用。")
+        self._show_style_profile_dialog(profile)
+
+    def _show_style_profile_dialog(self, profile):
+        dialog = StyleProfileDialog(profile, self)
+        if dialog.exec():
+            self.apply_style_profile(profile)
+
+    def apply_style_profile(self, profile):
+        style = str(getattr(profile, "prompt_style", "") or "").strip()
+        if not style:
+            self.set_notice("该风格档案没有可用的模型提示词，请重新生成。")
+            return
+        self.config["style"] = style
+        try:
+            settings.save(self.config)
+        except OSError:
+            self.set_notice("已选用专属风格，但本机未能保存设置；请检查用户目录权限。")
+            return
+        self.settings_page.config = dict(self.config)
+        self.settings_page.style.setEditText(style)
+        self.settings_page.style_profile_status.setText("已选用专属风格。")
+        self.set_notice("已选用专属回复风格；后续分析会按该风格生成建议。")
 
     def _store(self):
         if self._account_store is None:
