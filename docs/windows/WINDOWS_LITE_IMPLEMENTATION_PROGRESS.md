@@ -49,6 +49,7 @@
 | S-自动查找微信对话 | ✅ 真实验收通过（仅切换） | 恢复托盘窗口→OCR 搜索“田子夜”→点击结果+Enter→顶部 OCR 命中；未发送消息 |
 | P1 测试退出崩溃 | ✅ commit `4d8642d` | tests/__init__ runner 后清理顶层 QWidget；28/60→0/60；全量 622 项 `discover -s tests -t .` exit 0 |
 | S-TRAY-ACT 托盘隐藏下自动找对话/发送 | 🟡 找对话实测通过；发送方案同构待授权实测 | 临时恢复窗口→OCR 找对话→恢复托盘；发送需标题校验+焦点探针+双条件验证；UIA 实测不可用 |
+| S-STYLE-UI 专属风格设置页接线 | ✅ 完成 | 生成/预览/选用双层风格；prompt_style 写入风格设置；无联系人/样本不足给出可操作提示；全量 627 通过 |
 | D-UI 按设计 Skills 重构 UI | ⏳ 用户新增，排在功能与验收之后 | frontend-design / ui-ux-pro-max / impeccable / web-design-guidelines / theme-factory / canvas-design / web-artifacts-builder / brand-guidelines / react-best-practices / webapp-testing；PySide6 桌面 UI 按设计原则重构，React/Next 条目仅取可迁移原则 |
 | 设置下拉禁滚轮 | ✅ commit 29678b1 | 所有设置下拉 NoWheelComboBox，滚轮不改选择，弹窗最多 20 行 |
 
