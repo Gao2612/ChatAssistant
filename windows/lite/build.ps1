@@ -32,6 +32,11 @@ if (-not (Test-Path -LiteralPath $python3Dll)) {
 
 $outputDir = Join-Path $PSScriptRoot "dist-release"
 $workDir = Join-Path $PSScriptRoot "build-pyinstaller"
+# PowerShell 5.1 turns native stderr progress into a terminating error when
+# $ErrorActionPreference is Stop; keep Continue for native build tools and check
+# their exit codes explicitly.
+$previousPolicy = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
 & $python -m PyInstaller `
     --noconfirm `
     --clean `
@@ -46,8 +51,10 @@ $workDir = Join-Path $PSScriptRoot "build-pyinstaller"
     "--add-binary=$python3Dll;." `
     "--add-data=licenses;licenses" `
     main.py
+$pyInstallerExit = $LASTEXITCODE
+$ErrorActionPreference = $previousPolicy
 
-if ($LASTEXITCODE -ne 0) { throw "PyInstaller exited with code $LASTEXITCODE" }
+if ($pyInstallerExit -ne 0) { throw "PyInstaller exited with code $pyInstallerExit" }
 
 $appDir = Join-Path $outputDir "ChatAssistantLite"
 $exe = Join-Path $appDir "ChatAssistantLite.exe"
@@ -62,6 +69,18 @@ if (-not (Test-Path -LiteralPath $exe)) {
 # prevent QtWidgets from loading.
 Get-ChildItem -LiteralPath $internalDir -Filter "api-ms-win-*.dll" -File | Remove-Item -Force
 Get-ChildItem -LiteralPath $internalDir -Filter "icu*.dll" -File | Remove-Item -Force
+
+# T11: write and verify the build manifest against the source tree shipped here.
+$buildInfo = Join-Path $appDir "build_info.json"
+$previousPolicy = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+& $python (Join-Path $PSScriptRoot "tools\write_build_info.py") --output $buildInfo --source-root $PSScriptRoot
+$writeInfoExit = $LASTEXITCODE
+& $python (Join-Path $PSScriptRoot "tools\verify_build_info.py") --info $buildInfo --source-root $PSScriptRoot
+$verifyInfoExit = $LASTEXITCODE
+$ErrorActionPreference = $previousPolicy
+if ($writeInfoExit -ne 0) { throw "build_info.json generation failed (exit $writeInfoExit)" }
+if ($verifyInfoExit -ne 0) { throw "build_info.json verification failed (exit $verifyInfoExit)" }
 
 $env:QT_QPA_PLATFORM = "offscreen"
 $smoke = [System.Diagnostics.ProcessStartInfo]::new()
