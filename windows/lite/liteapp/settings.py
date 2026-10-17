@@ -9,9 +9,12 @@ from ctypes import wintypes
 DEFAULTS = {
     "wechat_path": r"C:\Program Files\Tencent\Weixin\Weixin.exe",
     # Analysis backends: chatgpt (official plan), api (compatible), local (compatible
-    # localhost service), codex (official app-server).
-    "base_url": "https://api.deepseek.com/v1",
-    "model": "deepseek-chat", "api_model": "deepseek-chat", "backend": "chatgpt", "host_id": "",
+    # localhost service), codex (official app-server). Every backend remembers its own
+    # model so switching back or restarting the app does not lose the binding.
+    "base_url": "https://api.deepseek.com/v1", "api_provider": "",
+    "model": "deepseek-chat", "api_model": "deepseek-chat",
+    "chatgpt_model": "", "local_model": "", "codex_model": "",
+    "backend": "chatgpt", "host_id": "",
     "style": "自然简短，不编造事实", "auto_connect": True, "auto_analysis": True,
     # Reading backends: ocr (local, offline), api (multimodal vision API),
     # codex (official app-server image input). Reading and analysis are independent.

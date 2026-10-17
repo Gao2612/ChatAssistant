@@ -1,5 +1,7 @@
 # Windows ChatAssistant 完整版实施计划
 
+> 2026-10-18 前置整改：用户补充的 T0a/T0b（读取/分析双后端、两端模型记忆、兼容 API 厂商预设与模型列表读取、ChatGPT 绑定持久化与手动断开）已先落地，见 [执行进度](WINDOWS_LITE_IMPLEMENTATION_PROGRESS.md)。T1–T12 任务定义与依赖不变。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 将现有 0.2 原型完成为可验收的实时微信助手、可溯源历史记忆分析和 Windows 安装交付。

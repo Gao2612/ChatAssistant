@@ -27,6 +27,8 @@ python -m venv .venv
 
 - **读取**：默认本地 OCR（离线，不上传画面）；可选多模态模型（OpenAI 兼容视觉接口）或 Codex 应用（官方 app-server 图像输入）。选择后两者时，只有当前聊天画面会发送给所选服务用于转写；失败自动回退本地 OCR，远程确认后的文字不会被本地 OCR 覆盖。
 - **分析**：ChatGPT Plus/Pro 官方 Sign in with ChatGPT（账号模型目录）、兼容 API、本地模型服务（OpenAI 兼容，默认 `http://127.0.0.1:11434/v1`，可不填 Key）或 Codex 应用（官方 app-server，只读沙箱、审批 `never`、拒绝服务端工具请求）。
+- **模型记忆**：每个分析后端分别记住自己的模型；重开应用或在后端之间来回切换后自动恢复，不会互相覆盖。ChatGPT 授权与模型目录持久保存，只有授权失效或手动「断开 ChatGPT 授权」时才需要重新连接。
+- **兼容/本地 API**：先选厂商预设（DeepSeek 官方 / OpenRouter / 通义兼容 / 本地 Ollama / 自定义），填地址与 Key 后可「读取模型列表」（请求接口 `GET /models`）并下拉选择；设置页和聊天页都显示当前生效的后端与模型。
 
 Codex 后端使用本机已登录的官方 Codex，不读取或复制 Codex 桌面凭据；本软件不会自动读取 Codex 桌面的当前模型或登录令牌。具体可用模型和额度以各服务返回为准。OAuth 凭据、分析与读取 API Key 由 Windows DPAPI 加密到 `%LOCALAPPDATA%\ChatAssistantLite\settings.json`。导入历史在同目录的 `memory.sqlite3`；实时画面与 OCR 快照不持久化、不写日志。只有自动分析准备就绪时，当前可见对话文本才发送到所选分析后端；历史库与离线报告不会自动上传。
 

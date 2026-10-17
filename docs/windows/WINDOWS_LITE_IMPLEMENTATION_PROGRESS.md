@@ -4,6 +4,8 @@
 
 **2026-10-18 更新**：读取/分析双后端已落码，86 项单测通过；真实 Codex 免费 RPC 验证通过。详见 [`_reports/backend_read_analysis_split_report.md`](../../_reports/backend_read_analysis_split_report.md) 与 [`WINDOWS_LITE_ACCEPTANCE_CHECKLIST_2026-10-18.md`](WINDOWS_LITE_ACCEPTANCE_CHECKLIST_2026-10-18.md)。
 
+**2026-10-18 多智能体实施更新**：用户点1（外部 API 厂商/地址/Key、读取模型列表、当前生效模型显示、保存入口）与点4（ChatGPT 绑定与模型记忆持久化）已由 Lead 完成（T0a/T0b）；T1（契约+单实例）由队友 contracts 并行实现中。基线 commit `558d705`；后续分阶段 commit 到 `feat/windows-lite`（不 push）。本地看板：http://127.0.0.1:8790/ ，共享任务板见 `team_task_*`。
+
 ## 恢复入口
 
 每小时自动任务已创建（id：`automation`），在当前聊天继续。若额度限制导致中断，下一次先读本文件和实际源码，再从未完成项目继续，不重新设计或重复已完成测试。只有实际验证过的项目才标记完成。
@@ -21,6 +23,9 @@
 | 项目 | 状态 | 证据/下一步 |
 | --- | --- | --- |
 | 每小时继续 | 已创建 | heartbeat，当前聊天，每小时尝试；额度限制时保存进度 |
+| T0a 外部 API 配置（点1） | ✅ 2026-10-18 已落码，全套测试通过 | 厂商预设 + `analysis.list_models`（GET /models）+ 自动读取 + 当前生效后端/模型显示 + 卡片内保存；`test_analysis_models.py` 等 |
+| T0b ChatGPT 绑定记忆（点4） | ✅ 2026-10-18 已落码，全套测试通过 | 诊断：凭据与 refresh token 持久化/刷新正常，根因是模型记忆与提示；新增 `chatgpt_model` 等分后端字段、自动恢复、授权状态与「断开授权」；重启不再要求浏览器授权 |
+| T1 契约与单实例 | 🟡 队友 contracts 实现中 | 新文件 `liteapp/contracts.py`、`single_instance.py`；等待其报告与 Lead 复核后合并提交 |
 | OCR 后自动分析 | 回归修复已落码，单测通过 | `state.py` 修订语义 + `ui.py` 重检恢复；`test_auto_pipeline.py` 4 项。0.2 安装包不包含该修复，需安装 0.3 包 |
 | 读取/分析独立配置 | ✅ 2026-10-18 已落码，单测通过 | `settings.py`（读取键 + DPAPI `protected_reading_key`）、`backends.py`、`reading.py`、`codex_backend.py`、`worker.py`、`ui.py`；86 项测试通过 |
 | 读取后端：本地 OCR | 默认保留，完全离线 | `worker.py`；原有验证 |
@@ -32,11 +37,13 @@
 | 分析后端：Codex | ✅ 已落码；真实免费 RPC 验证 | `codex_backend.analyze`；真实文本回合未执行（额度） |
 | 中央遮挡/当前联系人导入 | 未修复 | 根因与目标已写入设计和 T4/T8/T9 |
 | T1–T12 | 待执行 | 逐任务更新，不把旧单元通过计为新任务完成 |
-| 0.3 安装包 | 便携版已重建并通过冒烟；安装器编译结果见报告 | `build.ps1` / `installer/ChatAssistantLite.iss`；E:\ 已装 0.2，升级需用户安装 |
+| 0.3 安装包 | 0.3.0 已构建并安装；T0a/T0b 后重建 0.3.1 待执行 | `build.ps1` / `installer/ChatAssistantLite.iss`；E:\ChatAssistantLite 原地升级，桌面快捷方式保留 |
 
 ## 最新验证
 
-- 2026-10-18：`python -m unittest discover -s tests -q` → **86 项通过**（整改前 53 项中 51 通过、2 个失败为上一轮先写的读取/分析分开配置测试）。
+- 2026-10-18：T0a/T0b 落码后 `python -m unittest discover -s tests -q` → **137 项通过**（含 T1 队友并行新增的 contracts/single_instance 用例与 Lead 新增的 `test_analysis_models.py`）。T0a/T0b 单独覆盖：模型列表读取、厂商预设、分后端模型记忆、重启恢复、断开授权、ChatGPT 有效模型回退。
+- 2026-10-18：真实 ChatGPT 凭据诊断：`protected_subscription` 与 refresh_token 存在；access token 过期后 `subscription.access_token()` 刷新成功并回写 DPAPI（不消耗模型额度）。
+- 2026-10-18：`python -m unittest discover -s tests -q` → 86 项通过（T1 队友用例加入前）。
 - 2026-10-18：真实 Codex app-server 免费 RPC（initialize / account/read / model/list）通过：账号 `chatgpt` / `plus`，7 个模型均支持 `text,image`，关闭进程干净退出；未发送聊天内容、未消耗模型额度。
 - 2026-10-18：源码 `QT_QPA_PLATFORM=offscreen python main.py --smoke` 退出码 0；PyInstaller 重建便携版并通过 `--smoke`。
 - 2026-10-17：基线 46 项通过；新增自动链路回归先失败 3 项，修复后 51 项通过。

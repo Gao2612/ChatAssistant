@@ -20,6 +20,22 @@ def endpoint(base):
     return urlunsplit((u.scheme, u.netloc, path, "", ""))
 
 
+def models_endpoint(base):
+    """Resolve an OpenAI-compatible ``GET /models`` URL from a user-typed base URL."""
+    u = urlsplit(base.strip().rstrip("/"))
+    if (u.scheme not in ("https", "http") or not u.hostname or u.username or u.password
+            or u.query or u.fragment):
+        raise ValueError("请输入不含账号、密钥或查询参数的模型接口地址。")
+    if u.scheme == "http" and u.hostname not in ("localhost", "127.0.0.1", "::1"):
+        raise ValueError("远程接口请使用 HTTPS；HTTP 仅支持本机模型服务。")
+    path = u.path.rstrip("/")
+    if path.endswith("/chat/completions"):
+        path = path[: -len("/chat/completions")]
+    if not path.endswith("/models"):
+        path += "/models"
+    return urlunsplit((u.scheme, u.netloc, path, "", ""))
+
+
 def build_payload(text, relationship, style, model):
     if not text.strip():
         raise ValueError("请先识别或填写对话。")
@@ -70,12 +86,7 @@ class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def request_json(url, payload, headers=None, timeout=45):
-    """POST JSON, never follow redirects, cap the response size, never log the body."""
-    request_headers = {"Content-Type": "application/json", "Accept": "application/json"}
-    request_headers.update(headers or {})
-    request = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"),
-                                     headers=request_headers)
+def _open_json(request, timeout):
     try:
         opener = urllib.request.build_opener(NoRedirectHandler())
         with opener.open(request, timeout=timeout) as response:
@@ -94,6 +105,59 @@ def request_json(url, payload, headers=None, timeout=45):
         raise ValueError("模型连接失败或超时，请检查网络和接口地址。") from None
     except (json.JSONDecodeError, UnicodeDecodeError):
         raise ValueError("模型服务返回了无效 JSON。") from None
+
+
+def request_json(url, payload, headers=None, timeout=45):
+    """POST JSON, never follow redirects, cap the response size, never log the body."""
+    request_headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    request_headers.update(headers or {})
+    request = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"),
+                                     headers=request_headers)
+    return _open_json(request, timeout)
+
+
+def request_get_json(url, headers=None, timeout=30):
+    request_headers = {"Accept": "application/json"}
+    request_headers.update(headers or {})
+    return _open_json(urllib.request.Request(url, headers=request_headers, method="GET"), timeout)
+
+
+def list_models(config):
+    """Read ``GET {base}/models`` for a compatible analysis endpoint.
+
+    The API key is only sent to the configured endpoint; redirects are refused so
+    the bearer token cannot leak to another host.
+    """
+    backend = config.get("backend", "api")
+    base = (config.get("base_url") or "").strip()
+    if backend == "local" and not base:
+        base = DEFAULT_LOCAL_BASE
+    url = models_endpoint(base)
+    key = (config.get("api_key") or "").strip()
+    if backend != "local" and not key:
+        raise ValueError("请先填写模型 API Key，再读取模型列表。")
+    headers = {"Authorization": "Bearer " + key} if key else {}
+    obj = request_get_json(url, headers, timeout=30)
+    rows = obj.get("data") if isinstance(obj, dict) else None
+    if not isinstance(rows, list):
+        raise ValueError("接口没有返回模型列表（GET /models）。")
+    models, seen = [], set()
+    for row in rows[:500]:
+        if not isinstance(row, dict):
+            continue
+        model_id = row.get("id") or row.get("model") or row.get("name")
+        if not isinstance(model_id, str) or not model_id.strip():
+            continue
+        model_id = model_id.strip()[:200]
+        if model_id in seen:
+            continue
+        seen.add(model_id)
+        display = row.get("display_name") or row.get("name") or model_id
+        display = display if isinstance(display, str) and display.strip() else model_id
+        models.append((display.strip()[:120], model_id))
+    if not models:
+        raise ValueError("接口没有返回可用模型。")
+    return models
 
 
 def analyze(config, text):

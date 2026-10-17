@@ -119,6 +119,13 @@ flowchart LR
 
 用量页显示本应用已知的请求次数、任务进度以及服务返回的限制状态，并链接官方 Usage；没有官方数据时显示未知，不推算 Codex 剩余额度百分比或重置时刻。[官方模型目录](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference)。
 
+#### 6.2.1 实现补充（2026-10-18，T0a/T0b）
+
+- 读取与分析后端各自记忆模型：`reading_model`、`chatgpt_model`、`api_model`、`local_model`、`codex_model` 分字段持久化；应用重启、后端来回切换后自动恢复，不共用单个 `model` 字段。ChatGPT 授权与模型目录持久保存，只有授权失效、被撤销或用户手动断开时才提示重新连接。
+- 兼容/本地 API 配置增加厂商预设（DeepSeek 官方 / OpenRouter / 通义兼容 / 本地 Ollama / 自定义），选择后填入地址、仍可手改；输入地址与 Key 后通过 `GET {base}/models` 读取模型列表并下拉选择，读取结果不落日志。
+- 设置页与聊天页显示“当前分析：<后端> / <模型>”，分析卡片内提供保存入口；ChatGPT 显示已连接账号状态与「断开授权」（只清除该授权，保留其它配置）。T2 的多账号注册生命周期在此之上扩展。
+
+
 ### 6.3 通用模型层
 
 把现有专门输出三条建议的 `analyze` 拆成通用流式传输和三种任务 schema：`realtime_reply`、`history_extract`、`history_reduce`。完成事件和结构校验同时通过才提交结果；历史分析不能复用“三条回复”的校验器。

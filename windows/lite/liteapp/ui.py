@@ -13,7 +13,7 @@ from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QPainterPath, QPixmap,
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QPlainTextEdit, QLineEdit, QComboBox, QCheckBox, QFormLayout,
-    QFileDialog, QGroupBox, QScrollArea,
+    QFileDialog, QGroupBox, QScrollArea, QMessageBox,
     QFrame, QStackedWidget, QToolButton,
 )
 from . import settings
@@ -21,7 +21,7 @@ from .analysis import analyze
 from .state import ConversationState, FrameFreshness, choose_window
 from .discovery import discover, minimized
 from .worker import run as capture_run
-from . import backends, codex_backend, reading, subscription
+from . import analysis, backends, codex_backend, reading, subscription
 from .history_ui import HistoryPage
 from .window_dock import WindowDock
 
@@ -61,6 +61,8 @@ class SettingsPage(QWidget):
     saved = Signal(object)
     cancel_requested = Signal()
     codex_done = Signal(object, str)
+    models_done = Signal(object, str)
+    disconnect_requested = Signal()
 
     def __init__(self, config, parent=None):
         super().__init__(parent)
@@ -139,29 +141,50 @@ class SettingsPage(QWidget):
         for text, key in backends.ANALYSIS_CHOICES:
             self.backend.addItem(text, key)
         self.backend.setCurrentIndex(max(0, self.backend.findData(config.get("backend", "chatgpt"))))
-        self.model = QComboBox()
-        self.model.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        for display, slug in config.get("subscription_models", []):
-            self.model.addItem(display, slug)
+        self.provider = QComboBox()
+        for text, key, _base in backends.API_PRESETS:
+            self.provider.addItem(text, key)
+        self.provider.setCurrentIndex(max(0, self.provider.findData(
+            config.get("api_provider") or backends.match_preset(config.get("base_url", "")))))
         self.base = QLineEdit(config.get("base_url", ""))
         self.base.setPlaceholderText("兼容 API 地址；本地模型可填 http://127.0.0.1:11434/v1")
         self.key = QLineEdit(config.get("api_key", ""))
         self.key.setEchoMode(QLineEdit.EchoMode.Password)
+        self.model = QComboBox()
+        self.model.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.fetch_models_button = QPushButton("读取模型列表")
+        self.fetch_models_button.clicked.connect(self.fetch_models)
+        self.model_row = QHBoxLayout()
+        self.model_row.addWidget(self.model, 1)
+        self.model_row.addWidget(self.fetch_models_button)
+        self.model_status = label("", True)
         self.style = QLineEdit(config.get("style", ""))
         model_form.addRow("分析后端", self.backend)
+        model_form.addRow("API 厂商", self.provider)
         model_form.addRow("兼容/本地服务地址", self.base)
-        model_form.addRow("模型名称", self.model)
         model_form.addRow("API Key", self.key)
+        model_form.addRow("模型名称", self.model_row)
         model_form.addRow("回复风格", self.style)
         model_layout.addLayout(model_form)
+        model_layout.addWidget(self.model_status)
         self.backend.currentIndexChanged.connect(self.backend_changed)
+        self.provider.currentIndexChanged.connect(self.provider_changed)
+        self.models_done.connect(self.models_checked)
+        self.base.editingFinished.connect(self.auto_fetch_models)
+        self.key.editingFinished.connect(self.auto_fetch_models)
         auth_row = QHBoxLayout()
         self.chatgpt_button = QPushButton("连接 ChatGPT 套餐")
         self.usage_button = QPushButton("查看 ChatGPT Usage")
         self.usage_button.clicked.connect(lambda: webbrowser.open("https://chatgpt.com/settings/usage"))
+        self.disconnect_chatgpt_button = QPushButton("断开 ChatGPT 授权")
+        self.disconnect_chatgpt_button.clicked.connect(self.request_disconnect_chatgpt)
+        self.disconnect_chatgpt_button.setVisible(False)
         auth_row.addWidget(self.chatgpt_button)
         auth_row.addWidget(self.usage_button)
+        auth_row.addWidget(self.disconnect_chatgpt_button)
         model_layout.addLayout(auth_row)
+        self.chatgpt_state = label("", True)
+        model_layout.addWidget(self.chatgpt_state)
         self.auto_connect = QCheckBox("仅在发现唯一匹配窗口时自动连接")
         self.auto_connect.setChecked(bool(config.get("auto_connect", False)))
         self.auto_analysis = QCheckBox("自动分析新识别的对话")
@@ -170,8 +193,16 @@ class SettingsPage(QWidget):
         model_layout.addWidget(self.auto_analysis)
         model_layout.addWidget(label("开启自动分析后，当前可见对话文本会发送给所选分析后端；"
                                      "助手只生成建议，不会代你发送微信消息。", True))
-        model_layout.addWidget(label("ChatGPT 套餐需要在本应用单独授权。API Key 由 Windows DPAPI "
-                                     "加密保存。本地模型服务只连接本机地址。", True))
+        model_layout.addWidget(label("ChatGPT 套餐需要在本应用单独授权，授权和模型会被记住；"
+                                     "API Key 由 Windows DPAPI 加密保存。本地模型服务只连接本机地址。", True))
+        effective_row = QHBoxLayout()
+        self.effective_label = label("", True)
+        self.card_save_button = QPushButton("保存设置")
+        self.card_save_button.setObjectName("primary")
+        self.card_save_button.clicked.connect(self.commit)
+        effective_row.addWidget(self.effective_label, 1)
+        effective_row.addWidget(self.card_save_button)
+        model_layout.addLayout(effective_row)
         body.addWidget(model_group)
 
         codex_group = QGroupBox("Codex 账户（读取与分析的共用选项）")
@@ -195,6 +226,8 @@ class SettingsPage(QWidget):
 
         self.reading_changed()
         self.backend_changed()
+        self.update_chatgpt_state(config)
+        self.refresh_effective(config)
         body.addStretch(1)
         scroll.setWidget(content)
         outer.addWidget(scroll, 1)
@@ -224,21 +257,168 @@ class SettingsPage(QWidget):
         self.reading_model.setEnabled(backend in ("api", "codex"))
         self.reading_key.setEnabled(backend == "api")
 
+    def update_chatgpt_state(self, config):
+        connected = backends.chatgpt_connected(config)
+        account = config.get("subscription") or {}
+        if connected:
+            email = backends.masked_email(config)
+            plan = str(account.get("planType") or "").strip()
+            text = "已连接 ChatGPT" + (f"：{email}" if email else "") + (f"（{plan}）" if plan else "")
+            self.chatgpt_button.setText("重新连接 ChatGPT")
+        else:
+            text = "未连接 ChatGPT。授权一次后会长期记住，只有授权失效或手动断开才需要重连。"
+            self.chatgpt_button.setText("连接 ChatGPT 套餐")
+        self.chatgpt_state.setText(text)
+        self.disconnect_chatgpt_button.setVisible(connected)
+
+    def refresh_effective(self, config=None):
+        current = dict(config if config is not None else self.config)
+        backend = self.backend.currentData()
+        if backend:
+            current["backend"] = backend
+            if backend in ("api", "local", "codex"):
+                current["model"] = self.model.currentText().strip()
+        self.effective_label.setText("当前生效：" + backends.describe_analysis(current))
+
     def backend_changed(self):
         backend = self.backend.currentData()
-        self.model.setEditable(backend in ("api", "local", "codex"))
+        editable = backend in ("api", "local", "codex")
+        self.model.setEditable(editable)
+        remembered = backends.remembered_model(self.config, backend)
         if backend == "chatgpt":
-            index = self.model.findData(self.config.get("model"))
+            catalog_models = list(self.config.get("subscription_models", []))
+            catalog_values = [str(slug) for _name, slug in catalog_models]
+            current_values = [str(self.model.itemData(i)) for i in range(self.model.count())]
+            if current_values != catalog_values:
+                self.model.clear()
+                for display, slug in catalog_models:
+                    self.model.addItem(display, slug)
+            catalog = catalog_values
+            preferred = remembered if remembered in catalog else (catalog[0] if catalog else "")
+            index = self.model.findData(preferred)
             if index >= 0:
                 self.model.setCurrentIndex(index)
         elif backend == "api":
-            self.model.setEditText(self.config.get("api_model", "deepseek-chat"))
-        elif backend == "local":
-            self.model.setEditText(self.config.get("model", "") or self.config.get("api_model", ""))
-        else:  # codex
-            self.model.setEditText(self.config.get("model") if self.config.get("backend") == "codex" else "")
+            self.model.setEditText(remembered or "deepseek-chat")
+        else:
+            self.model.setEditText(remembered)
         self.base.setEnabled(backend in ("api", "local"))
         self.key.setEnabled(backend in ("api", "local"))
+        self.provider.setEnabled(backend == "api")
+        self.fetch_models_button.setEnabled(backend in ("api", "local"))
+        self.refresh_effective()
+
+    def provider_changed(self):
+        base = backends.preset_base(self.provider.currentData())
+        if base:
+            self.base.setText(base)
+            self.refresh_effective()
+
+    def fetch_models(self):
+        backend = self.backend.currentData()
+        if backend not in ("api", "local"):
+            self.model_status.setText("只有“兼容模型 API / 本地模型服务”可以读取模型列表。")
+            return
+        snapshot = dict(self.config, backend=backend, base_url=self.base.text().strip(),
+                        api_key=self.key.text().strip())
+        self.fetch_models_button.setEnabled(False)
+        self.model_status.setText("正在读取接口模型列表…")
+
+        def work():
+            try:
+                models = analysis.list_models(snapshot)
+                error = ""
+            except Exception as exc:
+                models, error = None, (str(exc) if isinstance(exc, ValueError)
+                                       else "读取模型列表失败，请检查地址与 Key。")
+            self.models_done.emit(models, error)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def auto_fetch_models(self):
+        backend = self.backend.currentData()
+        if backend not in ("api", "local"):
+            return
+        if not self.base.text().strip():
+            return
+        if backend == "api" and not self.key.text().strip():
+            return
+        self.fetch_models()
+
+    def models_checked(self, models, error):
+        self.fetch_models_button.setEnabled(self.backend.currentData() in ("api", "local"))
+        if error or not models:
+            self.model_status.setText(error or "接口没有返回可用模型。")
+            return
+        current = self.model.currentText().strip()
+        self.model.clear()
+        for display, model_id in models:
+            self.model.addItem(display, model_id)
+        index = self.model.findData(current)
+        if index < 0:
+            index = self.model.findText(current)
+        self.model.setCurrentIndex(index if index >= 0 else 0)
+        self.model_status.setText(f"已读取 {len(models)} 个模型，请选择后保存设置。")
+        self.refresh_effective()
+
+    def request_disconnect_chatgpt(self):
+        answer = QMessageBox.question(
+            self, "断开 ChatGPT 授权",
+            "只会清除本应用的 ChatGPT 授权和模型目录，其它后端配置保留。确定断开吗？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No)
+        if answer == QMessageBox.StandardButton.Yes:
+            self.disconnect_requested.emit()
+
+    def set_models(self, models):
+        remembered = backends.remembered_model(self.config, "chatgpt")
+        selected = remembered or self.config.get("model")
+        self.model.clear()
+        for display, slug in models:
+            self.model.addItem(display, slug)
+        index = self.model.findData(selected)
+        if index >= 0:
+            self.model.setCurrentIndex(index)
+        elif models:
+            self.model.setCurrentIndex(0)
+
+    def commit(self):
+        try:
+            backend = self.backend.currentData()
+            if backend == "chatgpt":
+                model = self.model.currentData()
+                candidate = dict(self.config, backend=backend, model=model or "")
+                if not model:
+                    model = backends.effective_model(candidate)
+                if not model:
+                    raise ValueError("请先连接 ChatGPT 并读取账号模型目录。")
+            else:
+                model = self.model.currentText().strip()
+                if not model:
+                    raise ValueError("请先读取或输入模型名称。")
+            cfg = dict(self.config, wechat_path=self.path.text().strip().strip('"'),
+                       backend=backend, base_url=self.base.text().strip(), model=model,
+                       api_key=self.key.text().strip(), style=self.style.text(),
+                       auto_connect=self.auto_connect.isChecked(),
+                       auto_analysis=self.auto_analysis.isChecked(),
+                       reading_backend=self.reading_backend.currentData(),
+                       reading_base_url=self.reading_base.text().strip(),
+                       reading_model=self.reading_model.text().strip(),
+                       reading_api_key=self.reading_key.text().strip(),
+                       codex_path=self.codex_path.text().strip(),
+                       api_provider=self.provider.currentData())
+            cfg[backends.MODEL_FIELDS[backend]] = model
+            backends.validate_reading(cfg)
+            backends.validate_analysis(cfg)
+            settings.save(cfg)
+            self.config = cfg
+            self.error.clear()
+            self.update_chatgpt_state(cfg)
+            self.refresh_effective(cfg)
+            self.model_status.setText("设置已保存。")
+            self.saved.emit(cfg)
+        except (ValueError, OSError) as exc:
+            self.error.setText(str(exc))
 
     def detect_codex(self):
         self.codex_button.setEnabled(False)
@@ -275,47 +455,6 @@ class SettingsPage(QWidget):
             self.model.setCurrentIndex(0)
         if models and not self.reading_model.text().strip():
             self.reading_model.setText(models[0]["id"])
-
-    def set_models(self, models):
-        selected = self.config.get("model")
-        self.model.clear()
-        for display, slug in models:
-            self.model.addItem(display, slug)
-        index = self.model.findData(selected)
-        if index >= 0:
-            self.model.setCurrentIndex(index)
-
-    def commit(self):
-        try:
-            backend = self.backend.currentData()
-            if backend == "chatgpt":
-                model = self.model.currentData()
-                if not model:
-                    raise ValueError("请先连接 ChatGPT 并读取账号模型目录。")
-            else:
-                model = self.model.currentText().strip()
-                if not model:
-                    raise ValueError("请输入模型名称。")
-            cfg = dict(self.config, wechat_path=self.path.text().strip().strip('"'),
-                       backend=backend, base_url=self.base.text().strip(), model=model,
-                       api_key=self.key.text().strip(), style=self.style.text(),
-                       auto_connect=self.auto_connect.isChecked(),
-                       auto_analysis=self.auto_analysis.isChecked(),
-                       reading_backend=self.reading_backend.currentData(),
-                       reading_base_url=self.reading_base.text().strip(),
-                       reading_model=self.reading_model.text().strip(),
-                       reading_api_key=self.reading_key.text().strip(),
-                       codex_path=self.codex_path.text().strip())
-            if backend in ("api", "local"):
-                cfg["api_model"] = model
-            backends.validate_reading(cfg)
-            backends.validate_analysis(cfg)
-            settings.save(cfg)
-            self.config = cfg
-            self.error.clear()
-            self.saved.emit(cfg)
-        except (ValueError, OSError) as exc:
-            self.error.setText(str(exc))
 
 
 # Kept as an import alias for existing downstream scripts using the settings editor.
@@ -366,7 +505,7 @@ class BrandMark(QWidget):
 class MainWindow(QMainWindow):
     def __init__(self, config=None, scanning=True):
         super().__init__()
-        self.setWindowTitle("微信实时助手 · 便捷版 0.3")
+        self.setWindowTitle("微信实时助手 · 便捷版 0.3.1")
         self.resize(1180, 790)
         self.setMinimumSize(850, 600)
         self.setStyleSheet(STYLE)
@@ -445,6 +584,8 @@ class MainWindow(QMainWindow):
         chat_header.addWidget(self.chat_title, 1)
         self.connection_status = label("未连接微信", True)
         chat_header.addWidget(self.connection_status)
+        self.effective_label = label("分析：未配置", True)
+        chat_header.addWidget(self.effective_label)
         self.analysis_status = label("等待分析", True)
         chat_header.addWidget(self.analysis_status)
         chat_layout.addLayout(chat_header)
@@ -517,6 +658,8 @@ class MainWindow(QMainWindow):
         self.settings_page = SettingsPage(self.config)
         self.settings_page.saved.connect(self.settings_saved)
         self.settings_page.cancel_requested.connect(self.show_chat)
+        self.settings_page.disconnect_requested.connect(self.disconnect_chatgpt)
+        self.refresh_effective_model()
         self.page_stack.addWidget(self.settings_page)
         self.history_page = HistoryPage()
         self.page_stack.addWidget(self.history_page)
@@ -684,6 +827,8 @@ class MainWindow(QMainWindow):
                          != (config.get("codex_path") or "").strip())
         self.config = dict(config)
         self.settings_page.config = dict(config)
+        self.settings_page.update_chatgpt_state(self.config)
+        self.refresh_effective_model()
         self.remote_reading = backends.reading_backend(config) != "ocr"
         self.reading_ok_token = None
         self.state.invalidate()
@@ -944,6 +1089,7 @@ class MainWindow(QMainWindow):
         token = self.state.token
         text = self.editor.toPlainText()
         cfg = dict(self.config, relationship="普通联系人")
+        cfg["model"] = backends.effective_model(cfg)
         self.busy = True
         self.analysis_status.setText("正在分析…")
         self.last_analysis = time.monotonic()
@@ -968,6 +1114,26 @@ class MainWindow(QMainWindow):
 
     def backend_ready(self):
         return backends.analysis_ready(self.config)
+
+    def refresh_effective_model(self):
+        self.effective_label.setText("分析：" + backends.describe_analysis(self.config))
+
+    def disconnect_chatgpt(self):
+        self.config["subscription"] = None
+        self.config["subscription_models"] = []
+        self.config["chatgpt_model"] = ""
+        try:
+            settings.save(self.config)
+        except OSError:
+            self.set_notice("已断开 ChatGPT 授权，但本机未能保存设置；请检查用户目录权限。")
+            return
+        self.settings_page.config = dict(self.config)
+        self.settings_page.update_chatgpt_state(self.config)
+        self.settings_page.set_models([])
+        self.refresh_effective_model()
+        self.state.invalidate()
+        self.clear_results()
+        self.set_notice("已断开本应用的 ChatGPT 授权；其它后端配置保留。需要时可重新连接。")
 
     def reading_snapshot_ready(self):
         if not self.remote_reading:
@@ -1093,6 +1259,7 @@ class MainWindow(QMainWindow):
         available = {slug for _name, slug in models}
         if self.config.get("model") not in available and models:
             self.config["model"] = models[0][1]
+        self.config["chatgpt_model"] = self.config.get("model") or ""
         self.config["backend"] = "chatgpt"
         try:
             settings.save(self.config)
@@ -1104,9 +1271,12 @@ class MainWindow(QMainWindow):
         self.settings_page.backend.setCurrentIndex(
             max(0, self.settings_page.backend.findData("chatgpt")))
         self.settings_page.set_models(models)
+        self.settings_page.update_chatgpt_state(self.config)
+        self.refresh_effective_model()
         account = credential.get("email") or "ChatGPT 账号"
         if models:
-            self.notice.setText(f"已连接 {account}，读取到 {len(models)} 个可用模型。请在设置中确认模型。")
+            self.notice.setText(f"已连接 {account}，读取到 {len(models)} 个可用模型。已记住账号与模型，"
+                                "下次重开无需重新授权。")
         else:
             self.notice.setText(error or "授权已保存，暂时没有可选模型；请检查网络后重新连接。")
 
