@@ -58,6 +58,23 @@ def label(text="", muted=False):
     return widget
 
 
+class NoWheelComboBox(QComboBox):
+    """Dropdown that never changes by scrolling the mouse wheel.
+
+    On Windows it is easy to scroll the settings page and accidentally change the
+    model/backend. Wheel events are ignored here (the page itself can still
+    scroll); every choice is selected by click. The popup shows up to 20 rows so
+    short lists never need inner scrolling.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMaxVisibleItems(20)
+
+    def wheelEvent(self, event):  # noqa: N802 - Qt API name
+        event.ignore()
+
+
 class SettingsPage(QWidget):
     saved = Signal(object)
     cancel_requested = Signal()
@@ -95,7 +112,7 @@ class SettingsPage(QWidget):
         path_row.addWidget(self.path, 1)
         path_row.addWidget(browse)
         path_form.addRow("微信程序路径", path_row)
-        self.windows = QComboBox()
+        self.windows = NoWheelComboBox()
         path_form.addRow("微信窗口", self.windows)
         wechat_layout.addLayout(path_form)
         actions = QHBoxLayout()
@@ -113,7 +130,7 @@ class SettingsPage(QWidget):
         reading_group = QGroupBox("文字读取（屏幕 → 聊天文字）")
         reading_layout = QVBoxLayout(reading_group)
         reading_form = QFormLayout()
-        self.reading_backend = QComboBox()
+        self.reading_backend = NoWheelComboBox()
         for text, key in backends.READING_CHOICES:
             self.reading_backend.addItem(text, key)
         self.reading_backend.setCurrentIndex(max(0, self.reading_backend.findData(
@@ -138,11 +155,11 @@ class SettingsPage(QWidget):
         model_group = QGroupBox("对话分析（聊天文字 → 判断与建议）")
         model_layout = QVBoxLayout(model_group)
         model_form = QFormLayout()
-        self.backend = QComboBox()
+        self.backend = NoWheelComboBox()
         for text, key in backends.ANALYSIS_CHOICES:
             self.backend.addItem(text, key)
         self.backend.setCurrentIndex(max(0, self.backend.findData(config.get("backend", "chatgpt"))))
-        self.provider = QComboBox()
+        self.provider = NoWheelComboBox()
         for text, key, _base in backends.API_PRESETS:
             self.provider.addItem(text, key)
         self.provider.setCurrentIndex(max(0, self.provider.findData(
@@ -151,7 +168,7 @@ class SettingsPage(QWidget):
         self.base.setPlaceholderText("兼容 API 地址；本地模型可填 http://127.0.0.1:11434/v1")
         self.key = QLineEdit(config.get("api_key", ""))
         self.key.setEchoMode(QLineEdit.EchoMode.Password)
-        self.model = QComboBox()
+        self.model = NoWheelComboBox()
         self.model.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         self.fetch_models_button = QPushButton("读取模型列表")
         self.fetch_models_button.clicked.connect(self.fetch_models)
