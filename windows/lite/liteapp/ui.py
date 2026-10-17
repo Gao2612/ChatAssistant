@@ -1994,12 +1994,8 @@ class MainWindow(QMainWindow):
         def work():
             was_hidden = self._prepare_wechat_for_action(hwnd)
             try:
-                from . import wechat_actions as wechat_actions
-                plan = wechat_actions.plan_for_window(hwnd)
-                verifier = wechat_actions.make_ocr_verifier(hwnd, None)
-                result = wechat_actions.select_conversation(
-                    hwnd, target, search_rect=plan["search_rect"],
-                    result_rect=plan["result_rect"], verify=verifier)
+                from .wechat_find import find_conversation
+                result = find_conversation(hwnd, target)
                 self.bus.wechat_action_done.emit("find", result, "")
             except Exception as exc:  # noqa: BLE001 - UI thread reports the message
                 self.bus.wechat_action_done.emit(
@@ -2131,6 +2127,10 @@ class MainWindow(QMainWindow):
             "input_failed": "输入框未获得焦点，未发送。",
             "invalid_window": "微信窗口句柄无效，请重新连接。",
             "timeout": "操作超时，请重试。",
+            "search_not_found": "没有找到微信搜索框，请确认微信主窗口已打开。",
+            "result_not_found": "搜索结果里没有找到该联系人，请检查名称后重试。",
+            "capture_failed": "无法获取微信画面，请确认微信窗口可见后重试。",
+            "clipboard_failed": "无法写入剪贴板，请重试。",
         }
         if reason in mapping:
             return mapping[reason]

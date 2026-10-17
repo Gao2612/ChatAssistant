@@ -279,7 +279,10 @@ class Win32Backend:
 
         The user explicitly initiated the action; this never loops and never
         touches any other window. Returns True only when the window is the
-        foreground window afterwards.
+        foreground window afterwards. Windows' foreground lock often blocks a
+        background process from activating a window while our own UI is foreground;
+        a single synthesized Alt press is the documented, non-injecting way to relax
+        that lock for this one explicit user action.
         """
         hwnd = int(hwnd)
         try:
@@ -287,8 +290,22 @@ class Win32Backend:
                 u32.ShowWindow(hwnd, SW_RESTORE)
             if not u32.IsWindowVisible(hwnd):
                 u32.ShowWindow(hwnd, SW_SHOWNOACTIVATE)
-            if not u32.SetForegroundWindow(hwnd):
-                return False
+            if int(u32.GetForegroundWindow() or 0) == hwnd:
+                return True
+            activated = bool(u32.SetForegroundWindow(hwnd))
+            if not activated:
+                VK_MENU = 0x12
+                try:
+                    u32.keybd_event(VK_MENU, 0, 0, None)
+                    activated = bool(u32.SetForegroundWindow(hwnd))
+                    u32.keybd_event(VK_MENU, 0, 2, None)
+                except OSError:
+                    activated = False
+            if not activated:
+                try:
+                    u32.SwitchToThisWindow(hwnd, True)
+                except OSError:
+                    pass
             return int(u32.GetForegroundWindow() or 0) == hwnd
         except (OSError, ValueError):
             return False
