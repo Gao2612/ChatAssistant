@@ -94,19 +94,46 @@ class RemoteReadingUiTests(unittest.TestCase):
         self.assertFalse(self.window.reading_snapshot_ready())
 
     def test_auto_analysis_is_gated_until_remote_reading_confirms_ocr_text(self):
-        with patch("liteapp.ui.analyze", return_value=RESULT) as analyze:
-            self.window.tick()
-            self.assertFalse(analyze.called)
-            self.assertFalse(self.window.busy)
-            self.window.reading_done(5, ("OCR 会话", [("her", "", "OCR 旧文本")]), "")
-            self.window.changed_at = 0.0
-            self.window.last_analysis = 0.0
-            self.window.tick()
-            deadline = time.monotonic() + 2
-            while self.window.busy and time.monotonic() < deadline:
-                self.app.processEvents()
-                time.sleep(0.01)
-        self.assertTrue(analyze.called)
+        class _Handle:
+            def __init__(self):
+                self.callback = None
+                self.cancelled = False
+                self.error = None
+                self.result = None
+
+            def set_callback(self, callback):
+                self.callback = callback
+
+        class _Queue:
+            def __init__(self):
+                self.submitted = []
+
+            def submit(self, request, scope_id=None):
+                self.submitted.append(request)
+                return _Handle()
+
+            def stop(self):
+                pass
+
+            def resume(self):
+                pass
+
+        self.window.inference_queue.stop()
+        queue = _Queue()
+        self.window.inference_queue = queue
+        self.window.tick()
+        self.assertEqual(queue.submitted, [])
+        self.assertFalse(self.window.busy)
+        self.window.reading_done(5, ("OCR 会话", [("her", "", "OCR 旧文本")]), "")
+        self.window.changed_at = 0.0
+        self.window.last_analysis = 0.0
+        self.window.tick()
+        deadline = time.monotonic() + 2
+        while not queue.submitted and time.monotonic() < deadline:
+            self.app.processEvents()
+            time.sleep(0.01)
+        self.assertEqual(len(queue.submitted), 1)
+        self.assertEqual(queue.submitted[0].kind, "realtime_reply")
 
     def test_ocr_snapshot_does_not_override_confirmed_remote_text(self):
         self.window.reading_done(5, ("模型会话", [("other", "", "远程文本")]), "")

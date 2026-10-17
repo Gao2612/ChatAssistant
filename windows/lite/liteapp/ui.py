@@ -24,6 +24,11 @@ from .discovery import WindowTarget, discover, dpi
 from .worker import run as capture_run
 from . import account_store, analysis, backends, codex_backend, reading, subscription
 from .history_ui import HistoryPage
+from .inference import GatewayProfile, InferenceGateway
+from .inference_queue import InferenceQueue
+from .inference_schemas import (
+    KIND_REALTIME_REPLY, InferenceAuthError, InferenceQuotaError, InferenceRequest,
+)
 from .window_manager import WindowManager, rect_to_physical
 
 STYLE = """
@@ -536,6 +541,39 @@ class ResultBus(QObject):
     subscription_done = Signal(object, object, str)
     read_done = Signal(object, object, str)
     account_done = Signal(str, object, str)
+    queue_event = Signal(object)
+
+
+class _UiInferenceGateway:
+    """Build the live profile when the queue worker runs, not when the UI submits.
+
+    ChatGPT access tokens are refreshed lazily by the account store; resolving the
+    profile inside the worker thread keeps the refresh (and its network timeout) off
+    the Qt main thread while every request still goes through InferenceGateway's
+    transport, cancellation and schema validation.
+    """
+
+    def __init__(self, window):
+        self.window = window
+
+    def run(self, request, cancel=None):
+        config = dict(self.window.config)
+        gateway = InferenceGateway()
+        backend = backends.analysis_backend(config)
+        if backend == "chatgpt":
+            gateway.register_profile("chatgpt", GatewayProfile(
+                backend="chatgpt", url=account_store.API_BASE + "/responses",
+                model=str(config.get("model") or "").strip(),
+                api_key=subscription.access_token(config)))
+        else:
+            base = str(config.get("base_url") or "").strip()
+            if backend == "local" and not base:
+                base = analysis.DEFAULT_LOCAL_BASE
+            gateway.register_profile("analysis", GatewayProfile(
+                backend="compatible", url=analysis.endpoint(base),
+                model=str(config.get("model") or "").strip(),
+                api_key=str(config.get("api_key") or "").strip()))
+        return gateway.run(request, cancel)
 
 
 class BrandMark(QWidget):
@@ -574,7 +612,8 @@ class BrandMark(QWidget):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, config=None, scanning=True, window_manager=None, account_store=None):
+    def __init__(self, config=None, scanning=True, window_manager=None, account_store=None,
+                 inference_queue=None):
         super().__init__()
         self.setWindowTitle("微信实时助手 · 便捷版 0.4.0")
         self.resize(1180, 790)
@@ -617,6 +656,13 @@ class MainWindow(QMainWindow):
         self.bus.subscription_done.connect(self.subscription_done)
         self.bus.read_done.connect(self.reading_done)
         self.bus.account_done.connect(self.account_action_done)
+        self._queue_action_slot = self._run_queue_action
+        self.bus.queue_event.connect(self._queue_action_slot)
+        # T3-UI: one global in-flight model request, latest-frame-only per scope.
+        # The real worker thread starts lazily on the first analysis (or earlier if
+        # the caller injects a queue), so mere window construction never leaks a
+        # model worker into tests or short-lived windows.
+        self._inference_queue = inference_queue
         root = QWidget()
         self.setCentralWidget(root)
         layout = QHBoxLayout(root)
@@ -739,7 +785,8 @@ class MainWindow(QMainWindow):
         self.settings_page.saved.connect(self.settings_saved)
         self.settings_page.cancel_requested.connect(self.show_chat)
         self.settings_page.disconnect_requested.connect(self.disconnect_chatgpt)
-        self.settings_page.account_action.connect(self._on_account_action)
+        self._account_action_slot = self._on_account_action
+        self.settings_page.account_action.connect(self._account_action_slot)
         self.settings_page.set_accounts(self.config.get("registrations") or [])
         self.refresh_effective_model()
         self.page_stack.addWidget(self.settings_page)
@@ -1328,6 +1375,12 @@ class MainWindow(QMainWindow):
             self.clear_results()
         elif not self.backend_ready():
             self.set_notice("自动分析已开启。配置并连接模型后，新识别内容会自动分析。")
+        else:
+            if self._inference_queue is not None:
+                try:
+                    self._inference_queue.resume()
+                except Exception:  # noqa: BLE001 - fake queue in tests
+                    pass
 
     def start_analysis(self):
         if self.busy or not self.state.ready:
@@ -1348,14 +1401,95 @@ class MainWindow(QMainWindow):
         self.last_analysis = time.monotonic()
         self.last_auto_token = token
         self.set_notice("正在分析当前可见对话；切换会话会使本次结果失效。")
-        def work():
-            try:
-                result = self._selected_analysis(cfg, text)
-                error = ""
-            except Exception as e:
-                result, error = None, str(e) if isinstance(e, ValueError) else "分析失败，请检查设置后重试。"
-            self.bus.done.emit(token, result, error)
-        threading.Thread(target=work, daemon=True).start()
+        if backends.analysis_backend(cfg) == "codex":
+            def work():
+                try:
+                    result = codex_backend.analyze(cfg, text)
+                    error = ""
+                except Exception as e:  # noqa: BLE001 - UI thread reports the message
+                    result, error = None, (
+                        str(e) if isinstance(e, ValueError) else "分析失败，请检查设置后重试。")
+                self.bus.done.emit(token, result, error)
+            threading.Thread(target=work, daemon=True).start()
+            return
+        try:
+            request = self._analysis_request(cfg, text)
+            handle = self.inference_queue.submit(
+                request, scope_id=self._queue_scope_id())
+        except (TypeError, ValueError) as exc:
+            self.busy = False
+            self.analysis_status.setText("分析未完成")
+            self.set_notice(str(exc))
+            return
+        handle.set_callback(lambda finished: self._on_inference_handle(token, finished))
+
+    def _queue_scope_id(self):
+        """Same visible chat = same realtime slot; a newer frame supersedes it."""
+        return "visible-chat"
+
+    @property
+    def inference_queue(self):
+        if self._inference_queue is None:
+            self._inference_queue = InferenceQueue(
+                _UiInferenceGateway(self), auto_start=True,
+                dispatch=self._dispatch_queue_action)
+        return self._inference_queue
+
+    @inference_queue.setter
+    def inference_queue(self, queue):
+        self._inference_queue = queue
+
+    def _dispatch_queue_action(self, action):
+        self.bus.queue_event.emit(action)
+
+    def _run_queue_action(self, action):
+        if callable(action):
+            action()
+
+    def _analysis_request(self, cfg, text):
+        backend = backends.analysis_backend(cfg)
+        model = str(backends.effective_model(cfg) or "").strip()
+        relationship = cfg.get("relationship", "普通联系人")
+        style = cfg.get("style", "自然、简短")
+        if backend == "chatgpt":
+            shared = subscription.build_payload(text, relationship, style, model)
+            return InferenceRequest(
+                task_id="ui-" + uuid.uuid4().hex, kind=KIND_REALTIME_REPLY,
+                profile_id="chatgpt",
+                input_data={"instructions": shared["messages"][0]["content"],
+                            "input": shared["messages"][1]["content"]},
+                schema_version="v1", version_key=f"chatgpt:{model}")
+        payload = analysis.build_payload(text, relationship, style, model)
+        return InferenceRequest(
+            task_id="ui-" + uuid.uuid4().hex, kind=KIND_REALTIME_REPLY,
+            profile_id="analysis",
+            input_data={"messages": payload["messages"],
+                        "temperature": payload["temperature"],
+                        "max_tokens": payload["max_tokens"]},
+            schema_version="v1", version_key=f"{backend}:{model}")
+
+    def _on_inference_handle(self, token, handle):
+        self.busy = False
+        if handle.cancelled:
+            return
+        if handle.error is not None:
+            self.analysis_status.setText("分析未完成")
+            if isinstance(handle.error, InferenceQuotaError):
+                self.analysis_status.setText("额度受限，自动分析已暂停")
+                self.set_notice("模型额度受限，自动分析已暂停；恢复额度后重新开启自动分析或保存设置即可继续。")
+            elif isinstance(handle.error, InferenceAuthError):
+                self.analysis_status.setText("授权失效")
+                self.set_notice("模型授权失效：" + str(handle.error) + " 请到设置中重新连接或刷新授权。")
+            else:
+                self.set_notice(str(handle.error) if isinstance(handle.error, ValueError)
+                                else "分析失败，请检查设置后重试。")
+            return
+        result = getattr(handle.result, "validated_data", None)
+        if not isinstance(result, dict):
+            self.analysis_status.setText("分析未完成")
+            self.set_notice("分析返回格式异常，请重试。")
+            return
+        self.analysis_done(token, result, "")
 
     def _selected_analysis(self, cfg, text):
         backend = backends.analysis_backend(cfg)
@@ -1766,9 +1900,25 @@ class MainWindow(QMainWindow):
         self.show_settings()
 
     def closeEvent(self, event):
+        # Break widget -> window bound-method connections before Qt destroys the
+        # widgets; otherwise the Python/Qt ownership cycle can crash on shutdown.
+        for signal, slot_name in ((self.settings_page.account_action, "_account_action_slot"),
+                                  (self.bus.queue_event, "_queue_action_slot")):
+            slot = getattr(self, slot_name, None)
+            if slot is not None:
+                try:
+                    signal.disconnect(slot)
+                except (RuntimeError, TypeError):
+                    pass
+                setattr(self, slot_name, None)
         self.scanner.stop()
         self.poll.stop()
         self.dock_timer.stop()
+        if self._inference_queue is not None:
+            try:
+                self._inference_queue.stop()
+            except Exception:  # noqa: BLE001 - fake queue / already stopped
+                pass
         self.undock()
         self.stop_capture()
         try:

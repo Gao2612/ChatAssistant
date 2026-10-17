@@ -236,6 +236,38 @@ class MainWindowBindingTests(unittest.TestCase):
             self.app.processEvents()
 
     def test_analysis_uses_effective_chatgpt_model(self):
+        from liteapp.inference_schemas import InferenceResult
+
+        class Handle:
+            def __init__(self, request):
+                self.request = request
+                self.callback = None
+                self.cancelled = False
+                self.error = None
+                self.result = None
+
+            def set_callback(self, callback):
+                self.callback = callback
+
+            def cancel(self):
+                self.cancelled = True
+
+        class Queue:
+            def __init__(self):
+                self.requests = []
+                self.last = None
+
+            def submit(self, request, scope_id=None):
+                self.requests.append(request)
+                self.last = Handle(request)
+                return self.last
+
+            def stop(self):
+                pass
+
+            def resume(self):
+                pass
+
         config = subscription_config(backend="chatgpt", model="vendor-chat",
                                      chatgpt_model="gpt-6-astra")
         self.window.config = config
@@ -245,20 +277,22 @@ class MainWindowBindingTests(unittest.TestCase):
         self.window.remote_reading = False
         self.window.reading_ok_token = None
         self.window.changed_at = 0
-        captured = {}
-        result = {"intent": "x", "need": "y", "action": "z", "caution": "", "replies": ["a", "b", "c"]}
-
-        def fake_analyze(cfg, text):
-            captured.update(cfg)
-            return result
-
-        with patch("liteapp.ui.subscription.analyze", side_effect=fake_analyze):
-            self.window.start_analysis()
-            deadline = time.monotonic() + 3
-            while self.window.busy and time.monotonic() < deadline:
-                self.app.processEvents()
-                time.sleep(0.01)
-        self.assertEqual(captured.get("model"), "gpt-6-astra")
+        queue = Queue()
+        self.window.inference_queue.stop()
+        self.window.inference_queue = queue
+        self.window.start_analysis()
+        self.assertEqual(len(queue.requests), 1)
+        request = queue.requests[0]
+        self.assertEqual(request.version_key, "chatgpt:gpt-6-astra")
+        self.assertIn("instructions", request.input_data)
+        result = {"intent": "x", "need": "y", "action": "z", "caution": "",
+                  "replies": ["a", "b", "c"]}
+        handle = queue.last
+        handle.result = InferenceResult(validated_data=dict(result),
+                                        request_id="req-1", elapsed=0.1)
+        handle.callback(handle)
+        self.assertFalse(self.window.busy)
+        self.assertIn("x", self.window.summary.text())
 
     def test_disconnect_chatgpt_clears_binding_but_keeps_other_backends(self):
         with patch("liteapp.ui.settings.save"):
