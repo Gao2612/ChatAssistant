@@ -20,7 +20,9 @@ from . import settings
 from .analysis import analyze
 from .contracts import CancellationToken, SourceKey
 from .state import ConversationState, FrameFreshness, choose_window
-from .discovery import WindowTarget, discover, dpi
+from .discovery import (
+    WindowTarget, discover, dpi, find_wechat_windows, restore_window, wechat_presence,
+)
 from .worker import run as capture_run
 from . import account_store, analysis, backends, codex_backend, reading, subscription
 from .history_ui import HistoryPage
@@ -1192,7 +1194,18 @@ class MainWindow(QMainWindow):
             if candidate and self.config["auto_connect"]:
                 self.connect_item(candidate)
             elif not items:
-                self.set_connection_status("等待微信窗口")
+                running = False
+                try:
+                    runtime_path = path or self.config.get("wechat_path", "")
+                    running = bool(runtime_path) and bool(
+                        wechat_presence(runtime_path).get("running"))
+                except (OSError, ValueError):
+                    running = False
+                if running:
+                    self.set_connection_status(
+                        "微信在运行但窗口不可见；点击“启动微信”恢复窗口，或从系统托盘打开微信。")
+                else:
+                    self.set_connection_status("等待微信窗口")
             elif len(items) > 1:
                 self.set_connection_status("发现多个微信窗口")
 
@@ -1909,6 +1922,33 @@ class MainWindow(QMainWindow):
         path = self.settings_page.path.text().strip().strip('"') or self.config["wechat_path"].strip().strip('"')
         if not Path(path).is_file() or Path(path).suffix.lower() != ".exe":
             self.notice.setText("微信路径无效，请在设置中选择官方微信程序。")
+            return
+        # Never start a second WeChat instance: if the process is already running,
+        # the button only restores the existing (possibly hidden/tray) window.
+        try:
+            presence = wechat_presence(path)
+        except (OSError, ValueError):
+            presence = {"running": False}
+        if presence.get("running"):
+            restored = False
+            try:
+                candidates = find_wechat_windows(path, include_hidden=True)
+            except OSError:
+                candidates = []
+            for window in candidates:
+                if (window.get("hidden") or window.get("minimized")
+                        or window.get("restorable")):
+                    if restore_window(window, activate=True):
+                        restored = True
+                        break
+            self.last_keys = None
+            self.scan()
+            if restored:
+                self.notice.setText(
+                    "微信已在运行，已恢复其窗口；若仍看不到，请从系统托盘打开微信。")
+            else:
+                self.notice.setText(
+                    "微信已在运行但窗口不可见，请从系统托盘打开微信；不会重复启动新的微信。")
             return
         try:
             subprocess.Popen([path], close_fds=True)

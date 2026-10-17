@@ -7,7 +7,14 @@ is re-validated before every operation.  T4 adds conservative classification
 checks and the :class:`liteapp.contracts.SourceKey` adapter used by
 ``WindowManager`` and ``RecoveryGuard``.
 
-All calls are read-only; this module never moves, activates, reparents or hooks
+S-WECHAT (task-17) adds read-only detection of *running* WeChat processes and of
+hidden/tray/minimized top-level windows (``IsWindowVisible == false``), plus an
+explicitly user-triggered :func:`restore_window` that shows such a window
+without stealing focus.  This lets the UI refuse to launch a second WeChat
+instance when one is already running in the tray.
+
+All functions are read-only except ``restore_window`` (only called on an
+explicit user click); this module never launches processes, reparents or hooks
 another application's window.
 """
 
@@ -35,6 +42,8 @@ u32.GetDpiForWindow.argtypes = [W.HWND]
 u32.GetDpiForWindow.restype = W.UINT
 u32.GetWindowLongW.argtypes = [W.HWND, ctypes.c_int]
 u32.GetWindowLongW.restype = ctypes.c_long
+u32.ShowWindow.argtypes = [W.HWND, ctypes.c_int]
+u32.ShowWindow.restype = W.BOOL
 k32.OpenProcess.argtypes = [W.DWORD, W.BOOL, W.DWORD]
 k32.OpenProcess.restype = W.HANDLE
 k32.QueryFullProcessImageNameW.argtypes = [W.HANDLE, W.DWORD, W.LPWSTR, ctypes.POINTER(W.DWORD)]
@@ -44,10 +53,54 @@ k32.GetProcessTimes.argtypes = [W.HANDLE, ctypes.POINTER(W.FILETIME), ctypes.POI
 k32.GetProcessTimes.restype = W.BOOL
 k32.CloseHandle.argtypes = [W.HANDLE]
 
+
+class PROCESSENTRY32W(ctypes.Structure):
+    _fields_ = [
+        ("dwSize", W.DWORD),
+        ("cntUsage", W.DWORD),
+        ("th32ProcessID", W.DWORD),
+        ("th32DefaultHeapID", ctypes.c_void_p),
+        ("th32ModuleID", W.DWORD),
+        ("cntThreads", W.DWORD),
+        ("th32ParentProcessID", W.DWORD),
+        ("pcPriClassBase", ctypes.c_long),
+        ("dwFlags", W.DWORD),
+        ("szExeFile", W.WCHAR * 260),
+    ]
+
+
+TH32CS_SNAPPROCESS = 0x00000002
+k32.CreateToolhelp32Snapshot.argtypes = [W.DWORD, W.DWORD]
+k32.CreateToolhelp32Snapshot.restype = W.HANDLE
+k32.Process32FirstW.argtypes = [W.HANDLE, ctypes.POINTER(PROCESSENTRY32W)]
+k32.Process32FirstW.restype = W.BOOL
+k32.Process32NextW.argtypes = [W.HANDLE, ctypes.POINTER(PROCESSENTRY32W)]
+k32.Process32NextW.restype = W.BOOL
+
 GW_OWNER = 4
 GW_HWNDPREV = 3
 GWL_EXSTYLE = -20
 WS_EX_TOOLWINDOW = 0x00000080
+DWMWA_CLOAKED = 14
+
+# Explicit show/restore commands; only restore_window uses them, and the default
+# path never activates the target (user requirement: 不抢焦点).
+SW_HIDE = 0
+SW_SHOWNOACTIVATE = 4
+SW_SHOW = 5
+SW_SHOWNA = 8
+SW_RESTORE = 9
+
+# WeChat ships under one of these executable names (Weixin.exe on current
+# builds, WeChat.exe on older ones). Used only to *detect* running processes.
+WECHAT_EXE_NAMES = ("weixin.exe", "wechat.exe")
+
+# Lifecycle status of a discovered top-level window, for UI hints.
+STATUS_VISIBLE = "visible"
+STATUS_MINIMIZED = "minimized"
+STATUS_HIDDEN = "hidden"
+STATUS_CLOAKED = "cloaked"
+WINDOW_STATUSES = (STATUS_VISIBLE, STATUS_MINIMIZED, STATUS_HIDDEN, STATUS_CLOAKED)
 
 # Conservative classification heuristics. Real WeChat 4.x class names are not
 # yet verified on this machine (T12); the title fallback keeps the 0.2 behaviour
@@ -146,8 +199,64 @@ def window_rect(hwnd):
     return (rect.left, rect.top, rect.right, rect.bottom)
 
 
+_dwmapi = None
+_dwm_attempted = False
+
+
+def _dwm():
+    """Lazy dwmapi binding used only for the DWMWA_CLOAKED window attribute."""
+    global _dwmapi, _dwm_attempted
+    if not _dwm_attempted:
+        _dwm_attempted = True
+        try:
+            _dwmapi = ctypes.WinDLL("dwmapi", use_last_error=True)
+            _dwmapi.DwmGetWindowAttribute.argtypes = [W.HWND, W.DWORD,
+                                                      ctypes.c_void_p, W.DWORD]
+            _dwmapi.DwmGetWindowAttribute.restype = ctypes.c_long
+        except (OSError, AttributeError):
+            _dwmapi = None
+    return _dwmapi
+
+
+def window_cloaked(hwnd):
+    """True when DWM cloaks the window (e.g. another virtual desktop / suspended UWP).
+
+    A cloaked window is not recoverable with ShowWindow; reporting it separately
+    keeps the UI from pretending it restored the window.
+    """
+    hwnd = int(hwnd)
+    if not hwnd:
+        return False
+    dwm = _dwm()
+    if dwm is None:
+        return False
+    try:
+        value = W.DWORD(0)
+        result = dwm.DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED,
+                                           ctypes.byref(value), ctypes.sizeof(value))
+        return bool(result == 0 and value.value)
+    except (OSError, ValueError):
+        return False
+
+
+def window_status(hwnd):
+    """Lifecycle status string for one window (visible/minimized/hidden/cloaked)."""
+    hwnd = int(hwnd)
+    if window_cloaked(hwnd):
+        return STATUS_CLOAKED
+    if u32.IsIconic(hwnd):
+        return STATUS_MINIMIZED
+    if u32.IsWindowVisible(hwnd):
+        return STATUS_VISIBLE
+    return STATUS_HIDDEN
+
+
 def window_info(hwnd):
-    """Read-only snapshot of one window; returns None when the handle is gone."""
+    """Read-only snapshot of one window; returns None when the handle is gone.
+
+    Includes hidden (``IsWindowVisible == false``) top-level windows, their
+    lifecycle ``status`` and the DWM-cloaked flag.
+    """
     hwnd = int(hwnd)
     if not u32.IsWindow(hwnd):
         return None
@@ -158,6 +267,17 @@ def window_info(hwnd):
     title = window_title(hwnd)
     class_name = window_class_name(hwnd)
     owner = window_owner(hwnd)
+    visible = bool(u32.IsWindowVisible(hwnd))
+    minimized = bool(u32.IsIconic(hwnd))
+    cloaked = window_cloaked(hwnd)
+    if cloaked:
+        status = STATUS_CLOAKED
+    elif minimized:
+        status = STATUS_MINIMIZED
+    elif visible:
+        status = STATUS_VISIBLE
+    else:
+        status = STATUS_HIDDEN
     return {
         "hwnd": hwnd,
         "pid": pid,
@@ -165,10 +285,39 @@ def window_info(hwnd):
         "class": class_name,
         "rect": rect,
         "owner": owner,
-        "visible": bool(u32.IsWindowVisible(hwnd)),
-        "minimized": bool(u32.IsIconic(hwnd)),
+        "visible": visible,
+        "hidden": not visible,
+        "minimized": minimized,
+        "cloaked": cloaked,
+        "status": status,
+        "tool_window": bool(u32.GetWindowLongW(hwnd, GWL_EXSTYLE) & WS_EX_TOOLWINDOW),
         "dpi": dpi(hwnd),
         "kind": classify_window(title, class_name, rect, owner),
+    }
+
+
+def _window_item(info, identity):
+    """Public item shape for one verified window (superset of the 0.2 fields)."""
+    hwnd = info["hwnd"]
+    target = WindowTarget(hwnd, identity["pid"], identity["path"], identity["created"])
+    return {
+        "id": f"{identity['pid']}:{hwnd}:{identity['created']}",
+        "hwnd": target,
+        "pid": identity["pid"],
+        "path": identity["path"],
+        "created": identity["created"],
+        "title": info["title"],
+        "class": info["class"],
+        "kind": info["kind"],
+        "dpi": info["dpi"],
+        "minimized": info["minimized"],
+        "visible": info["visible"],
+        "hidden": info["hidden"],
+        "cloaked": info["cloaked"],
+        "status": info["status"],
+        "tool_window": info["tool_window"],
+        "owner": info["owner"],
+        "rect": info["rect"],
     }
 
 
@@ -203,15 +352,23 @@ def _collect_windows(collector):
     u32.EnumWindows(callback, 0)
 
 
-def discover(path):
-    """Enumerate chat/login top-level windows of the executable at ``path``."""
+def discover(path, include_hidden=False):
+    """Enumerate chat/login top-level windows of the executable at ``path``.
+
+    ``include_hidden=False`` keeps the 0.2 behaviour (visible windows only).
+    ``include_hidden=True`` additionally returns windows hidden from the taskbar
+    / tray (``IsWindowVisible == false``) so the UI can offer to restore them.
+    Items carry ``visible/hidden/minimized/cloaked/status`` for the UI decision.
+    """
     expected = normalize_path(path)
     result = []
     identities = {}
 
     def collect(hwnd):
-        if not u32.IsWindowVisible(hwnd) or u32.GetWindow(hwnd, GW_OWNER):
+        if not include_hidden and not u32.IsWindowVisible(hwnd):
             return
+        if u32.GetWindow(hwnd, GW_OWNER):
+            return  # owned popups/dialogs are never the main/login window
         pid = window_pid(hwnd)
         if not pid:
             return
@@ -220,19 +377,10 @@ def discover(path):
         identity = identities[pid]
         if not identity or identity["path"] != expected:
             return
-        title, cls = window_title(hwnd), window_class_name(hwnd)
-        rect = window_rect(hwnd)
-        if rect is None:
+        info = window_info(hwnd)
+        if info is None or info["kind"] not in (KIND_CHAT, KIND_LOGIN):
             return
-        kind = classify_window(title, cls, rect, window_owner(hwnd))
-        if kind not in (KIND_CHAT, KIND_LOGIN):
-            return
-        target = WindowTarget(hwnd, identity["pid"], identity["path"], identity["created"])
-        result.append({"id": f"{pid}:{hwnd}:{identity['created']}", "hwnd": target,
-                       "pid": pid, "path": identity["path"], "created": identity["created"],
-                       "title": title, "class": cls, "kind": kind,
-                       "dpi": dpi(hwnd),
-                       "minimized": bool(u32.IsIconic(hwnd))})
+        result.append(_window_item(info, identity))
     _collect_windows(collect)
     return result
 
@@ -378,3 +526,242 @@ def minimized(hwnd):
 
 def dpi(hwnd):
     return u32.GetDpiForWindow(hwnd) or 96
+
+
+# ---------------------------------------------------------------------------
+# S-WECHAT (task-17): running-process detection, hidden/tray windows, restore
+# ---------------------------------------------------------------------------
+
+def _valid_snapshot_handle(handle):
+    if not handle:
+        return False
+    try:
+        return int(handle) not in (-1, 0xFFFFFFFFFFFFFFFF)
+    except (TypeError, ValueError):
+        return False
+
+
+def enumerate_processes():
+    """Read-only snapshot of running processes: ``pid``, ``exe_name``, ``path``.
+
+    ``path`` is the normalized full image path (empty when Windows denies the
+    query). Nothing is launched, opened for writing or terminated.
+    """
+    result = []
+    try:
+        snapshot = k32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+    except (OSError, ValueError):
+        return result
+    if not _valid_snapshot_handle(snapshot):
+        return result
+    try:
+        entry = PROCESSENTRY32W()
+        entry.dwSize = ctypes.sizeof(PROCESSENTRY32W)
+        if not k32.Process32FirstW(snapshot, ctypes.byref(entry)):
+            return result
+        while True:
+            pid = int(entry.th32ProcessID)
+            if pid:
+                result.append({"pid": pid,
+                               "exe_name": entry.szExeFile or "",
+                               "path": process_path(pid)})
+            entry.dwSize = ctypes.sizeof(PROCESSENTRY32W)
+            if not k32.Process32NextW(snapshot, ctypes.byref(entry)):
+                break
+    except (OSError, ValueError):
+        pass
+    finally:
+        try:
+            k32.CloseHandle(snapshot)
+        except (OSError, ValueError):
+            pass
+    return result
+
+
+def _entry_is_wechat(entry):
+    exe_name = (entry.get("exe_name") or "").strip().casefold()
+    if exe_name in WECHAT_EXE_NAMES:
+        return True
+    path = entry.get("path") or ""
+    if path:
+        basename = path.replace("/", "\\").rsplit("\\", 1)[-1].casefold()
+        return basename in WECHAT_EXE_NAMES
+    return False
+
+
+def running_wechat_paths():
+    """Normalized executable paths of every running official WeChat process.
+
+    Used by the UI to decide "already running -> never Popen a second copy".
+    Detection uses the process snapshot only; no WeChat state is modified.
+    """
+    paths = {entry["path"] for entry in enumerate_processes()
+             if entry.get("path") and _entry_is_wechat(entry)}
+    return sorted(paths)
+
+
+def process_running(path):
+    """True when a process with this exact (normalized) executable path runs."""
+    try:
+        expected = normalize_path(path) if path else ""
+    except (AttributeError, TypeError, ValueError):
+        return False
+    if not expected or expected == ".":
+        return False
+    return any(entry.get("path") == expected for entry in enumerate_processes())
+
+
+def _top_level_windows_for_process(pid):
+    """Main/login top-level windows of one process, including hidden ones."""
+    pid = int(pid)
+    found = []
+    if not pid:
+        return found
+
+    def collect(hwnd):
+        if window_pid(hwnd) != pid:
+            return
+        if window_owner(hwnd):
+            return  # popups/dialogs are not main/login candidates
+        info = window_info(hwnd)
+        if info is None or info["kind"] not in (KIND_CHAT, KIND_LOGIN):
+            return
+        found.append(info)
+    _collect_windows(collect)
+    found.sort(key=lambda item: (item["status"] == STATUS_CLOAKED,
+                                 not item["visible"], item["minimized"],
+                                 item["kind"] != KIND_CHAT, item["hwnd"]))
+    return found
+
+
+def find_wechat_processes(path, *, include_hidden=True):
+    """Running processes of the configured WeChat exe plus their window candidates.
+
+    Returns one dict per matching process: ``pid``, ``path``, ``created``,
+    ``exe_name``, ``windows`` (items shaped like :func:`discover` results,
+    including ``IsWindowVisible == false`` windows), ``has_window`` and
+    ``hidden_windows``. Unrelated processes and windows are never included.
+    """
+    expected = normalize_path(path)
+    result = []
+    for entry in enumerate_processes():
+        if entry.get("path") != expected:
+            continue
+        identity = process_identity(entry["pid"])
+        if not identity:
+            continue
+        infos = _top_level_windows_for_process(identity["pid"])
+        windows = [_window_item(info, identity) for info in infos
+                   if include_hidden or info["visible"]]
+        result.append({
+            "pid": identity["pid"],
+            "path": identity["path"],
+            "created": identity["created"],
+            "exe_name": entry.get("exe_name") or "",
+            "windows": windows,
+            "has_window": bool(windows),
+            "hidden_windows": sum(1 for item in windows if not item["visible"]),
+        })
+    return result
+
+
+def find_wechat_windows(path, *, include_hidden=True):
+    """Flattened window candidates, ordered visible -> minimized -> hidden/cloaked."""
+    windows = [window
+               for process in find_wechat_processes(path, include_hidden=include_hidden)
+               for window in process["windows"]]
+    windows.sort(key=lambda item: (item["status"] == STATUS_CLOAKED,
+                                   not item["visible"], item["minimized"],
+                                   item["kind"] != KIND_CHAT, int(item["hwnd"])))
+    return windows
+
+
+def wechat_presence(path, *, include_hidden=True):
+    """One aggregate answer for the launch/connect button (read-only).
+
+    Keys: ``running`` (a process exists), ``processes``/``windows`` (detail),
+    ``hidden_windows``, ``visible_windows``, ``restorable`` (a non-cloaked
+    window can be shown), ``tray_only`` (process alive but no top-level window).
+    """
+    try:
+        expected = normalize_path(path) if path else ""
+    except (AttributeError, TypeError, ValueError):
+        expected = ""
+    if not expected or expected == ".":
+        return {"path": "", "running": False, "processes": [], "windows": [],
+                "window_count": 0, "hidden_windows": 0, "visible_windows": 0,
+                "restorable": False, "tray_only": False}
+    processes = find_wechat_processes(expected, include_hidden=include_hidden)
+    windows = [window for process in processes for window in process["windows"]]
+    hidden = [window for window in windows if not window["visible"]]
+    restorable = any(window["status"] in (STATUS_VISIBLE, STATUS_MINIMIZED, STATUS_HIDDEN)
+                     for window in windows)
+    return {
+        "path": expected,
+        "running": bool(processes),
+        "processes": processes,
+        "windows": windows,
+        "window_count": len(windows),
+        "hidden_windows": len(hidden),
+        "visible_windows": len(windows) - len(hidden),
+        "restorable": restorable,
+        "tray_only": bool(processes) and not windows,
+    }
+
+
+def _restore_target(window):
+    """Resolve restore_window input; fail closed for stale identities/bad handles."""
+    if isinstance(window, dict):
+        window = window.get("hwnd", window.get("window"))
+    if isinstance(window, WindowTarget):
+        return int(window) if valid(window) else None
+    if isinstance(window, bool):
+        return None
+    if isinstance(window, int):
+        if window and u32.IsWindow(window):
+            return window
+        return None
+    return None
+
+
+def restore_window(window, *, activate=False):
+    """Show a hidden/minimized WeChat window on an explicit user action.
+
+    ``window`` may be an item returned by :func:`discover` /
+    :func:`find_wechat_windows`, its ``WindowTarget`` or a raw HWND.
+    ``WindowTarget``/dict input is identity-verified first, so a reused HWND
+    from a different process instance is never shown.
+
+    Default behaviour never calls a force-foreground API: hidden windows are
+    shown with ``SW_SHOWNOACTIVATE`` (verified to keep the foreground window
+    unchanged) and there is no looping. Only the explicit "启动/连接" button may
+    pass ``activate=True``; it then uses the native ``SW_RESTORE`` semantics.
+    Note: Windows itself may activate a *minimized* window while un-minimizing
+    it even with ``SW_SHOWNOACTIVATE``; this module still never calls
+    SetForegroundWindow and never raises a window on its own.
+    Returns False and touches nothing for cloaked windows, stale identities,
+    invalid handles or when the window stays hidden. No SetParent, no style
+    change, no input injection.
+    """
+    target = _restore_target(window)
+    if target is None:
+        return False
+    hwnd = int(target)
+    try:
+        if window_cloaked(hwnd):
+            # Cloaked windows (other virtual desktop / suspended) cannot be
+            # shown with ShowWindow; do not pretend they were restored.
+            return False
+        if activate:
+            u32.ShowWindow(hwnd, SW_RESTORE)
+            if not u32.IsWindowVisible(hwnd):
+                u32.ShowWindow(hwnd, SW_SHOW)
+            return bool(u32.IsWindowVisible(hwnd))
+        u32.ShowWindow(hwnd, SW_SHOWNOACTIVATE)
+        if not u32.IsWindowVisible(hwnd):
+            # SW_SHOWNA ("show, keep active window active") for windows hidden
+            # with SW_HIDE; still no activation.
+            u32.ShowWindow(hwnd, SW_SHOWNA)
+        return bool(u32.IsWindowVisible(hwnd))
+    except (OSError, ValueError):
+        return False
