@@ -665,6 +665,12 @@ class MainWindow(QMainWindow):
         self.reading_busy = False
         self.pending_read = None
         self.last_ocr_snapshot = None
+        # Recent full conversation context: a snapshot shows only the viewport, so
+        # overlapping frames are merged into one recent transcript used for analysis.
+        self.recent_title = ""
+        self._recent_messages = []
+        self.REALTIME_MAX_MESSAGES = 200
+        self.REALTIME_MAX_CHARS = 12000
         # T4-UI: all native docking goes through WindowManager. A recovery store
         # under the application data directory lets the crash guard restore the
         # managed window after an abnormal exit (records are signed; no chat
@@ -1237,6 +1243,7 @@ class MainWindow(QMainWindow):
         self.user_paused = False
         self.capture_session = uuid.uuid4().hex
         self.state.connect(self.capture_session)
+        self._clear_recent()
         self.set_editor("")
         self.clear_results()
         self.reading_ok_token = None
@@ -1344,6 +1351,7 @@ class MainWindow(QMainWindow):
                         if self.reading_snapshot_ready():
                             continue
                     changed = self.state.update(packet["title"], packet["messages"])
+                    self._remember_recent(packet["title"], packet["messages"])
                     if changed and manager is not None and source is not None:
                         manager.record_frame(source, changed=True)
                     self.chat_title.setText(packet["title"])
@@ -1397,6 +1405,51 @@ class MainWindow(QMainWindow):
                 and time.monotonic() - self.last_analysis > 10):
             self.start_analysis()
 
+    def _remember_recent(self, title, messages):
+        """Merge a viewport snapshot into the recent full-conversation buffer.
+
+        Consecutive snapshots overlap: the longest suffix/prefix match is appended
+        once, so scrolling does not duplicate messages. A different conversation
+        title starts a fresh buffer; very long histories keep only the recent tail.
+        """
+        title = str(title or "").strip()
+        if not title:
+            return
+        items = [(str(who), str(name or ""), str(body))
+                 for who, name, body in (messages or []) if str(body).strip()]
+        if not items:
+            return
+        if title != self.recent_title:
+            self.recent_title = title
+            self._recent_messages = []
+        merged = list(self._recent_messages)
+        overlap = 0
+        if merged:
+            for size in range(min(len(merged), len(items)), 0, -1):
+                if merged[-size:] == items[:size]:
+                    overlap = size
+                    break
+        merged.extend(items[overlap:])
+        while len(merged) > self.REALTIME_MAX_MESSAGES:
+            merged.pop(0)
+        while (len(merged) > 1
+               and sum(len(item[2]) for item in merged) > self.REALTIME_MAX_CHARS):
+            merged.pop(0)
+        self._recent_messages = merged
+
+    def _recent_transcript(self):
+        if not self._recent_messages:
+            return ""
+        lines = []
+        for who, name, body in self._recent_messages:
+            speaker = "我" if who == "me" else (name or "对方")
+            lines.append(f"{speaker}：{body}")
+        return "\n".join(lines)
+
+    def _clear_recent(self):
+        self.recent_title = ""
+        self._recent_messages = []
+
     def auto_toggled(self, enabled):
         self.config["auto_analysis"] = bool(enabled)
         try:
@@ -1426,7 +1479,9 @@ class MainWindow(QMainWindow):
                 self.open_settings()
             return
         token = self.state.token
-        text = self.editor.toPlainText()
+        # Prefer the accumulated recent transcript (viewport-overlap merged across
+        # frames) over the current OCR crop; fall back to the visible editor text.
+        text = self._recent_transcript() or self.editor.toPlainText()
         cfg = dict(self.config, relationship="普通联系人")
         cfg["model"] = backends.effective_model(cfg)
         self.busy = True
@@ -1772,6 +1827,7 @@ class MainWindow(QMainWindow):
             fallback = self.last_ocr_snapshot
             if fallback and self.frame_freshness.accepts(fallback[2]):
                 self.state.update(fallback[0], fallback[1])
+                self._remember_recent(fallback[0], fallback[1])
                 self.set_editor(self.state.text)
                 if fallback[0]:
                     self.chat_title.setText(fallback[0])
@@ -1783,6 +1839,7 @@ class MainWindow(QMainWindow):
         elif accepted and result:
             title, messages = result
             changed = self.state.update(title, messages)
+            self._remember_recent(title, messages)
             if title:
                 self.chat_title.setText(title)
             self.set_editor(self.state.text)
