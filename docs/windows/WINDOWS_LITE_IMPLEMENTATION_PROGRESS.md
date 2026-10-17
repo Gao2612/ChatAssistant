@@ -46,6 +46,8 @@
 | S-HTML/PDF 专属风格 | 🟡 history 队友实现中（task-18） | `style_profile.py`：筛选“我”的发言→本地特征→中文风格说明→加密派生记忆；UI 接线待 Lead |
 | P1 测试进程退出崩溃 | 🟡 contracts 排查中 | 单模块通过、组合模块在 “Ran OK” 后 0xC0000409；不修完不把全量回归当 T12 证据 |
 | S-DOCK 镜像预览/停靠开关 | 🟡 用户新要求，Lead 实现中 | 默认镜像只读预览，不改原生微信大小/位置；停靠改为默认关闭的显式开关；应用 resize 只缩放预览 |
+| S-自动查找微信对话 | ✅ 真实验收通过（仅切换） | 恢复托盘窗口→OCR 搜索“田子夜”→点击结果+Enter→顶部 OCR 命中；未发送消息 |
+| P1 测试退出崩溃 | ✅ commit `4d8642d` | tests/__init__ runner 后清理顶层 QWidget；28/60→0/60；全量 622 项 `discover -s tests -t .` exit 0 |
 | D-UI 按设计 Skills 重构 UI | ⏳ 用户新增，排在功能与验收之后 | frontend-design / ui-ux-pro-max / impeccable / web-design-guidelines / theme-factory / canvas-design / web-artifacts-builder / brand-guidelines / react-best-practices / webapp-testing；PySide6 桌面 UI 按设计原则重构，React/Next 条目仅取可迁移原则 |
 | 设置下拉禁滚轮 | ✅ commit 29678b1 | 所有设置下拉 NoWheelComboBox，滚轮不改选择，弹窗最多 20 行 |
 
