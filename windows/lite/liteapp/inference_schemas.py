@@ -83,22 +83,32 @@ def _require_int(value: Any, name: str) -> int:
     return value
 
 
-def _allowed_records(request: "InferenceRequest | None") -> dict[str, int] | None:
-    """Map of allowed record IDs to their text length, when the caller provided it."""
+def _allowed_records(request: "InferenceRequest | None") -> dict[str, int]:
+    """Fail-closed map ``record_id -> text length`` for one history task.
+
+    R-06: history tasks must carry the frozen batch records. A missing/empty
+    ``records`` list, malformed entries, non-string text or duplicate record IDs
+    are rejected instead of silently skipping the evidence-range check.
+    """
     if request is None:
-        return None
+        raise SchemaError("历史任务缺少 records 证据范围，已拒收。")
     rows = request.input_data.get("records")
-    if not isinstance(rows, (list, tuple)):
-        return None
+    if not isinstance(rows, (list, tuple)) or not rows:
+        raise SchemaError("历史任务缺少 records 证据范围，已拒收。")
     allowed: dict[str, int] = {}
     for row in rows:
         if not isinstance(row, dict):
-            continue
+            raise SchemaError("records 条目格式不正确，已拒收。")
         record_id = row.get("record_id")
+        if not isinstance(record_id, str) or not record_id.strip():
+            raise SchemaError("records 的 record_id 无效，已拒收。")
         text = row.get("text")
-        if isinstance(record_id, str) and record_id and isinstance(text, str):
-            allowed[record_id] = len(text)
-    return allowed or None
+        if not isinstance(text, str):
+            raise SchemaError("records 的正文无效，已拒收。")
+        if record_id in allowed:
+            raise SchemaError("records 的 record_id 重复，已拒收。")
+        allowed[record_id] = len(text)
+    return allowed
 
 
 def _normalize_evidence(value: Any, allowed: dict[str, int] | None) -> list[dict]:

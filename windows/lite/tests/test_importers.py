@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).parents[1]))
 
 from liteapp.contracts import CancellationToken, CancelledError, ScopeKey
 from liteapp.history import HistoryImportError, HistoryStore
-from liteapp.history_models import ImportedRecord, PageIssue
+from liteapp.history_models import ImportedRecord, ImportSource, PageIssue
 from liteapp.import_jobs import ImportJobError, ImportJobs, ImportProgress
 from liteapp.importers import create_parser, probe, select_parser, supported_extensions
 from liteapp.importers import base
@@ -648,6 +648,97 @@ class ImportJobsTests(ImportTestCase):
             time.sleep(0.005)
         self.assertIn("parse", phases)
         self.assertEqual(jobs.progress(job_id).status, "succeeded")
+
+
+class PageRetryTests(ImportTestCase):
+    """R-04: 同一来源的超时/失败页可以重试；已成功页不重复、不丢记录。"""
+
+    @staticmethod
+    def source(page_issues=(), digest="c" * 64, source_id=None):
+        return ImportSource(digest=digest, kind="pdf", name="合成扫描件.pdf",
+                            page_count=3, page_issues=tuple(page_issues),
+                            source_id=source_id)
+
+    @staticmethod
+    def page_record(page, text, ordinal=0):
+        return ImportedRecord(text=text, ordinal=ordinal, record_type="fragment",
+                              locator={"kind": "pdf", "page": page, "line": 1})
+
+    def test_retry_merges_a_recovered_page_without_duplicating_successful_pages(self):
+        scope = self.store.create_person("重试客户", "account-retry")
+        first = self.store.import_records(
+            scope, self.source((PageIssue(page=2, code="timeout"),)),
+            [self.page_record(1, "第一页正文", 0), self.page_record(3, "第三页正文", 1)])
+        retried = self.store.import_records(
+            scope, self.source(source_id=first.source_id),
+            [self.page_record(1, "第一页正文", 0), self.page_record(2, "第二页正文", 1),
+             self.page_record(3, "第三页正文", 2)], retry=True)
+        self.assertTrue(retried.retried)
+        self.assertFalse(retried.duplicate)
+        self.assertEqual((retried.source_version, retried.memory_version), (2, 2))
+        rows = list(self.store.iter_records(scope, retried.source_version))
+        self.assertEqual([row.text for row in rows],
+                         ["第一页正文", "第二页正文", "第三页正文"])
+        source = self.store.list_sources(scope)[0]
+        self.assertEqual(source.import_version, 2)
+        self.assertEqual(source.record_count, 3)
+        self.assertEqual(source.page_issues, ())
+        self.assertGreaterEqual(retried.source_version, first.source_version + 1)
+
+    def test_retry_keeps_old_successful_pages_when_a_page_still_fails(self):
+        scope = self.store.create_person("重试客户", "account-retry")
+        first = self.store.import_records(
+            scope, self.source((PageIssue(page=2, code="timeout"),)),
+            [self.page_record(1, "第一页正文", 0), self.page_record(3, "第三页正文", 1)])
+        retried = self.store.import_records(
+            scope, self.source((PageIssue(page=2, code="timeout"),),
+                               source_id=first.source_id),
+            [self.page_record(1, "第一页正文", 0)], retry=True)
+        self.assertTrue(retried.retried)
+        rows = list(self.store.iter_records(scope, retried.source_version))
+        self.assertEqual([row.text for row in rows], ["第一页正文", "第三页正文"])
+        source = self.store.list_sources(scope)[0]
+        self.assertEqual(source.import_version, 2)
+        self.assertEqual([(issue.page, issue.code) for issue in source.page_issues],
+                         [(2, "timeout")])
+
+    def test_retry_rejects_source_without_retryable_page_issues(self):
+        scope = self.store.create_person("重试客户", "account-retry")
+        self.store.import_records(
+            scope, self.source(), [self.page_record(1, "第一页正文")])
+        with self.assertRaises(HistoryImportError):
+            self.store.import_records(
+                scope, self.source(), [self.page_record(1, "第一页正文")], retry=True)
+
+    def test_retry_requires_existing_source_id(self):
+        scope = self.store.create_person("重试客户", "account-retry")
+        with self.assertRaises(HistoryImportError):
+            self.store.import_records(
+                scope, self.source(), [self.page_record(1, "第一页正文")], retry=True)
+
+    def test_import_jobs_retry_path_reports_retried_source(self):
+        scope = self.store.create_person("重试客户", "account-retry")
+        fake_pdf = self.folder / "retry_fake.pdf"
+        fake_pdf.write_bytes(b"%PDF-1.4\n% synthetic fake worker retry file\n")
+        jobs = self.jobs(worker_command=[sys.executable, str(FAKE_PDF_WORKER)])
+        first = jobs.wait(jobs.start(scope, fake_pdf, False), timeout=60)
+        self.assertEqual(first.status, "succeeded", first.error)
+        self.assertIsNotNone(first.source_id)
+        self.assertEqual([(issue.page, issue.code) for issue in first.page_issues],
+                         [(2, "timeout")])
+        retry_job = jobs.start_retry(scope, first.source_id, fake_pdf, False)
+        retried = jobs.wait(retry_job, timeout=60)
+        self.assertEqual(retried.status, "succeeded", retried.error)
+        self.assertTrue(retried.retried)
+        rows = list(self.store.iter_records(scope, retried.source_version))
+        self.assertEqual([row.locator["page"] for row in rows], [1, 3])
+        self.assertEqual(self.store.list_sources(scope)[0].import_version, 2)
+
+    def test_import_jobs_retry_rejects_unknown_source_id(self):
+        scope = self.store.create_person("重试客户", "account-retry")
+        jobs = self.jobs()
+        with self.assertRaises(ImportJobError):
+            jobs.start_retry(scope, "missing-source-id", GENERIC_HTML, False)
 
 
 class HistoryUiImportIntegrationTests(ImportTestCase):

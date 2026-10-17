@@ -29,7 +29,7 @@ import uuid
 from contextlib import contextmanager
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Any, Iterable, Iterator
+from typing import Any, Iterable, Iterator, Mapping
 
 from .contracts import EvidenceRef, ScopeKey
 from .history_migrations import SCHEMA_VERSION, MigrationResult, migrate_database
@@ -69,6 +69,18 @@ __all__ = [
 ]
 
 MAX_IMPORT_FILE_BYTES = 100 * 1024 * 1024
+RETRYABLE_PAGE_CODES = ("timeout", "worker_error")
+"""Page-level issue codes that a retry import may try to recover (R-04)."""
+
+
+def _retryable_pages(issues: Iterable[Any]) -> set[int]:
+    return {issue.page for issue in issues if issue.code in RETRYABLE_PAGE_CODES}
+
+
+def _record_page(record: ImportedRecord) -> int | None:
+    locator = record.locator if isinstance(record.locator, Mapping) else None
+    page = locator.get("page") if locator is not None else None
+    return page if isinstance(page, int) and not isinstance(page, bool) else None
 
 
 class _PlainHTML(HTMLParser):
@@ -312,7 +324,8 @@ class HistoryStore:
         return materialized
 
     def _source_result(self, db: sqlite3.Connection, scope: ScopeKey,
-                       source_id: str, duplicate: bool) -> ImportResult:
+                       source_id: str, duplicate: bool,
+                       *, retried: bool = False) -> ImportResult:
         row = db.execute(
             "SELECT s.record_count, s.char_count, s.page_count, s.failure_count, "
             "s.page_issues FROM sources s WHERE s.id=?", (source_id,)).fetchone()
@@ -323,23 +336,34 @@ class HistoryStore:
             source_id=source_id, duplicate=duplicate, record_count=row[0],
             char_count=row[1], page_count=row[2], failure_count=row[3],
             source_version=source_version, memory_version=memory_version,
-            page_issues=decode_page_issues(self._open(row[4]) if row[4] else None))
+            page_issues=decode_page_issues(self._open(row[4]) if row[4] else None),
+            retried=retried)
 
     def import_records(self, scope: ScopeKey, source: ImportSource,
-                       records: Iterable[ImportedRecord]) -> ImportResult:
+                       records: Iterable[ImportedRecord], *,
+                       retry: bool = False) -> ImportResult:
         """Transactionally store parser output for one file inside one scope.
 
         Same file digest in the same scope is an idempotent duplicate (no new
         records and no version bump). Supplying an existing ``source.source_id``
         inside this scope revises that source atomically; a source ID owned by
         another scope is rejected.
+
+        ``retry=True`` is the T6/R-04 recovery path for an existing source whose
+        recorded ``page_issues`` contain ``timeout``/``worker_error``: pages parsed
+        again replace their old records, while pages still failing keep the records
+        recovered by the previous import (never duplicated, never silently lost).
         """
         self._require_scope(scope)
         if not isinstance(source, ImportSource):
             raise TypeError("source 必须是 ImportSource。")
+        if not isinstance(retry, bool):
+            raise TypeError("retry 必须是布尔值。")
         with self._connect() as db:
             self._validate_scope(db, scope)
             materialized = self._materialize_records(records)
+            if retry:
+                return self._retry_import(db, scope, source, materialized)
             duplicate = db.execute(
                 "SELECT id FROM sources WHERE person_id=? AND digest=?",
                 (scope.person_id, source.digest)).fetchone()
@@ -408,6 +432,135 @@ class HistoryStore:
                 char_count=char_count, page_count=source.page_count,
                 failure_count=failure_count, source_version=source_version,
                 memory_version=memory_version, page_issues=source.page_issues)
+
+    # -------------------------------------------------- retry failed pages (R-04)
+    def _retry_import(self, db: sqlite3.Connection, scope: ScopeKey,
+                      source: ImportSource,
+                      materialized: list[ImportedRecord]) -> ImportResult:
+        """Recover ``timeout``/``worker_error`` pages of one existing source.
+
+        The re-parsed file must be the same file (same digest). Pages that parsed
+        again replace their previous records; pages that still fail keep the rows
+        recovered by the previous import, so a retry can never duplicate successful
+        pages or silently drop them.
+        """
+        source_id = source.source_id
+        if source_id is None:
+            raise HistoryImportError("重试导入必须指定已有来源 source_id。")
+        row = db.execute(
+            "SELECT account_id, person_id, digest, page_issues FROM sources WHERE id=?",
+            (source_id,)).fetchone()
+        if row is None:
+            raise SourceNotFoundError("要重试的来源不存在。")
+        if row[0] != scope.wechat_account_id or row[1] != scope.person_id:
+            raise ScopeMismatchError(
+                "跨账号重试被拒绝：来源不属于当前微信账号与联系人。")
+        if row[2] != source.digest:
+            raise HistoryImportError(
+                "重试的文件内容与已导入来源不一致；请按新的文件修订导入。")
+        existing_issues = decode_page_issues(self._open(row[3]) if row[3] else None)
+        if not _retryable_pages(existing_issues):
+            raise HistoryImportError("该来源没有可重试的超时/解析失败页。")
+
+        old_rows = db.execute(
+            "SELECT record_id, ordinal, record_type, sender, sent_at, body, locator, "
+            "quality, char_count FROM records WHERE source_id=? ORDER BY ordinal",
+            (source_id,)).fetchall()
+        old_by_page: dict[int, list[tuple]] = {}
+        old_unpaged: list[tuple] = []
+        for old_row in old_rows:
+            locator = self._open_json(old_row[6])
+            page = locator.get("page") if isinstance(locator, dict) else None
+            if isinstance(page, int) and not isinstance(page, bool):
+                old_by_page.setdefault(page, []).append(old_row)
+            else:
+                old_unpaged.append(old_row)
+
+        new_by_page: dict[int, list[ImportedRecord]] = {}
+        new_unpaged: list[ImportedRecord] = []
+        for item in materialized:
+            page = _record_page(item)
+            if page is None:
+                new_unpaged.append(item)
+            else:
+                new_by_page.setdefault(page, []).append(item)
+
+        if not new_by_page:
+            # Non-paged formats (HTML/legacy) can only be replaced as a whole.
+            if old_unpaged and len(old_unpaged) == len(old_rows):
+                rows = [self._new_record_row(item, scope, source_id, ordinal)
+                        for ordinal, item in enumerate(materialized)]
+                return self._commit_merged_rows(
+                    db, scope, source, rows,
+                    sum(len(item.text) for item in materialized))
+            raise HistoryImportError(
+                "重试的文件没有页码定位，无法与已有 PDF 记录安全合并。")
+        if new_unpaged:
+            raise HistoryImportError(
+                "重试的文件混合了有页码和无页码记录，无法安全合并。")
+
+        rows: list[tuple] = []
+        char_count = 0
+        for page in sorted(set(new_by_page) | set(old_by_page)):
+            if page in new_by_page:
+                for item in new_by_page[page]:
+                    rows.append(self._new_record_row(item, scope, source_id, len(rows)))
+                    char_count += len(item.text)
+            else:
+                # This page still failed (or was not parsed again): keep the
+                # records recovered by the previous import instead of losing them.
+                for old_row in old_by_page.get(page, ()):
+                    rows.append(self._existing_record_row(
+                        old_row, scope, source_id, len(rows)))
+                    char_count += int(old_row[8])
+        return self._commit_merged_rows(db, scope, source, rows, char_count)
+
+    def _new_record_row(self, item: ImportedRecord, scope: ScopeKey,
+                        source_id: str, ordinal: int) -> tuple:
+        return (
+            item.record_id or uuid.uuid4().hex, source_id,
+            scope.wechat_account_id, scope.person_id, ordinal, item.record_type,
+            self._seal(item.sender) if item.sender is not None else None,
+            self._seal(item.sent_at) if item.sent_at is not None else None,
+            self._seal(item.text),
+            self._seal_json(item.locator) if item.locator is not None else None,
+            self._seal_json(item.quality) if item.quality is not None else None,
+            len(item.text))
+
+    def _existing_record_row(self, old_row: tuple, scope: ScopeKey,
+                             source_id: str, ordinal: int) -> tuple:
+        """Re-insert one already-encrypted row with a new sequential ordinal."""
+        return (
+            old_row[0], source_id, scope.wechat_account_id, scope.person_id, ordinal,
+            old_row[2], old_row[3], old_row[4], old_row[5], old_row[6], old_row[7],
+            old_row[8])
+
+    def _commit_merged_rows(self, db: sqlite3.Connection, scope: ScopeKey,
+                            source: ImportSource, rows: list[tuple],
+                            char_count: int) -> ImportResult:
+        source_id = source.source_id
+        assert source_id is not None
+        db.execute("DELETE FROM records WHERE source_id=?", (source_id,))
+        db.executemany(
+            "INSERT INTO records(record_id, source_id, account_id, person_id, "
+            "ordinal, record_type, sender, sent_at, body, locator, quality, "
+            "char_count) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+        db.execute(
+            "UPDATE sources SET kind=?, parser_version=?, import_version=import_version+1, "
+            "name=?, page_count=?, record_count=?, char_count=?, failure_count=?, "
+            "page_issues=? WHERE id=?",
+            (source.kind, source.parser_version, self._seal(source.name),
+             source.page_count, len(rows), char_count, len(source.page_issues),
+             self._seal(encode_page_issues(source.page_issues)), source_id))
+        source_version, memory_version = self._bump_versions(db, scope)
+        db.execute("DELETE FROM derived_memory WHERE account_id=? AND person_id=?",
+                   (scope.wechat_account_id, scope.person_id))
+        return ImportResult(
+            source_id=source_id, duplicate=False, record_count=len(rows),
+            char_count=char_count, page_count=source.page_count,
+            failure_count=len(source.page_issues), source_version=source_version,
+            memory_version=memory_version, page_issues=source.page_issues,
+            retried=True)
 
     def import_file(self, scope: ScopeKey, path: Path | str) -> dict[str, Any]:
         """Interim convenience import (HTML/PDF) kept for the current history UI.

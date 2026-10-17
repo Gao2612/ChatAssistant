@@ -23,6 +23,7 @@ Prompt construction stays in the callers (``analysis.build_payload`` /
 """
 from __future__ import annotations
 
+import http.client
 import json
 import threading
 import time
@@ -56,6 +57,7 @@ DEFAULT_KIND_TIMEOUTS = {
     KIND_HISTORY_REDUCE: 180.0,
 }
 DEFAULT_MAX_RESPONSE_BYTES = 4 * 1024 * 1024
+SSE_READ_CHUNK_BYTES = 64 * 1024
 _RESPONSES_ALLOWED_INPUT_KEYS = ("instructions", "input")
 _COMPATIBLE_ALLOWED_INPUT_KEYS = ("messages", "temperature", "max_tokens", "top_p")
 _USAGE_KEYS = ("input_tokens", "output_tokens", "total_tokens",
@@ -141,6 +143,13 @@ def _classify_http_error(exc: urllib.error.HTTPError) -> InferenceError:
         return InferenceAuthError("模型授权已失效或未获准使用，请重新连接账号。")
     if status == 429:
         return InferenceTransientError("模型服务当前限流，请稍后重试。")
+    if status == 400:
+        # DeepSeek/OpenAI-compatible providers commonly answer an unknown model
+        # slug with HTTP 400. Give the user an actionable next step instead of a
+        # bare code (the configured settings are never modified here).
+        return InferenceProtocolError(
+            "接口拒绝请求（HTTP 400）：模型名称可能不受服务商支持，"
+            "请点击『读取模型列表』后重新选择模型。")
     if 400 <= status < 500:
         return InferenceProtocolError(f"模型请求被拒绝（HTTP {status}）。")
     return InferenceTransientError(f"模型服务暂时不可用（HTTP {status}）。")
@@ -160,9 +169,28 @@ def _open_stream(url: str, payload: dict, headers: dict, *,
         raise InferenceTransientError("模型服务连接失败或超时。") from None
 
 
+def _read_sse_chunk(response: Any, size: int) -> bytes:
+    """Read at most ``size`` bytes without buffering an unbounded line.
+
+    ``http.client.HTTPResponse.read1`` performs at most one underlying read, so a
+    malicious/oversized line cannot force the client to buffer the whole line
+    before the response-size guard runs. In-memory test doubles that only offer
+    ``read`` still work through the fallback (they return as soon as data exists).
+    """
+    reader = getattr(response, "read1", None)
+    if callable(reader):
+        return reader(size)
+    return response.read(size)
+
+
 def _iter_sse(response: Any, *, cancel: CancellationToken, deadline: float,
               clock: Callable[[], float], max_bytes: int, meta: dict) -> Iterator[dict]:
-    """Yield parsed SSE events; enforce size, deadline, idle timeout and cancel."""
+    """Yield parsed SSE events; enforce size, deadline, idle timeout and cancel.
+
+    The stream is consumed in bounded chunks instead of ``readline()``: the
+    configured ``max_bytes`` is an actual memory bound, not only a post-hoc check
+    of a line that was already fully buffered (R-05).
+    """
     idle_timeout = meta.get("idle_timeout")
     if idle_timeout:
         _apply_read_timeout(response, float(idle_timeout))
@@ -172,53 +200,98 @@ def _iter_sse(response: Any, *, cancel: CancellationToken, deadline: float,
     done = threading.Event()
     _start_cancel_watcher(cancel, response, done)
     seen = 0
+    pending = bytearray()
     event_type = ""
     data_lines: list[str] = []
+
+    def process_line(line: str):
+        nonlocal event_type, data_lines
+        if not line:
+            if not data_lines:
+                event_type = ""
+                return None
+            raw = "\n".join(data_lines)
+            data_lines = []
+            if raw.strip() == "[DONE]":
+                return "done"
+            try:
+                event = json.loads(raw)
+            except ValueError:
+                raise InferenceProtocolError("模型流返回了无效事件。") from None
+            if not isinstance(event, dict):
+                raise InferenceProtocolError("模型流返回了无效事件。")
+            event_type = ""
+            return event
+        if line.startswith("event:"):
+            event_type = line[6:].strip()
+        elif line.startswith("data:"):
+            data = line[5:].lstrip()
+            if data:
+                data_lines.append(data)
+        return None
+
+    def process_trailing_line():
+        """Process EOF tail like the old ``readline`` path did (no blank line)."""
+        if not pending:
+            return None
+        final = bytes(pending).decode("utf-8", "replace").rstrip("\r")
+        pending.clear()
+        return process_line(final)
+
+    def check_limits() -> None:
+        """Cancel/deadline gate: also runs between events inside one read chunk."""
+        if cancel.is_cancelled():
+            raise CancelledError("inference cancelled")
+        if clock() >= deadline:
+            raise InferenceTimeoutError("模型请求超时，请稍后重试。")
+
     try:
         while True:
-            if cancel.is_cancelled():
-                raise CancelledError("inference cancelled")
-            if clock() >= deadline:
-                raise InferenceTimeoutError("模型请求超时，请稍后重试。")
+            check_limits()
             try:
-                raw_line = response.readline()
+                chunk = _read_sse_chunk(response, SSE_READ_CHUNK_BYTES)
             except TimeoutError:
                 if cancel.is_cancelled():
                     raise CancelledError("inference cancelled") from None
                 raise InferenceTimeoutError("模型流长时间没有数据，请稍后重试。") from None
+            except http.client.IncompleteRead:
+                if cancel.is_cancelled():
+                    raise CancelledError("inference cancelled") from None
+                raise InferenceTransientError("模型流连接中断，请稍后重试。") from None
+            except (AttributeError, ValueError):
+                # The cancel watcher may close the response while read1() is in
+                # flight; map that race to cancellation instead of a raw error.
+                if cancel.is_cancelled():
+                    raise CancelledError("inference cancelled") from None
+                raise InferenceTransientError("模型流连接中断，请稍后重试。") from None
             except OSError:
                 if cancel.is_cancelled():
                     raise CancelledError("inference cancelled") from None
                 raise InferenceTransientError("模型流连接中断，请稍后重试。") from None
-            if not raw_line:
-                break
-            seen += len(raw_line)
+            if not chunk:
+                trailing = process_trailing_line()
+                if trailing == "done":
+                    return
+                if trailing is not None:
+                    check_limits()
+                    yield trailing
+                return
+            seen += len(chunk)
             if seen > max_bytes:
                 raise InferenceProtocolError("模型响应过大。")
-            line = raw_line.decode("utf-8", "replace").rstrip("\r\n")
-            if not line:
-                if not data_lines:
-                    event_type = ""
-                    continue
-                raw = "\n".join(data_lines)
-                data_lines = []
-                if raw.strip() == "[DONE]":
+            pending.extend(chunk)
+            while True:
+                newline = pending.find(b"\n")
+                if newline < 0:
+                    break
+                line = bytes(pending[:newline]).decode("utf-8", "replace").rstrip("\r")
+                del pending[:newline + 1]
+                event = process_line(line)
+                if event == "done":
                     return
-                try:
-                    event = json.loads(raw)
-                except ValueError:
-                    raise InferenceProtocolError("模型流返回了无效事件。") from None
-                if not isinstance(event, dict):
-                    raise InferenceProtocolError("模型流返回了无效事件。")
-                yield event
-                event_type = ""
-                continue
-            if line.startswith("event:"):
-                event_type = line[6:].strip()
-            elif line.startswith("data:"):
-                data = line[5:].lstrip()
-                if data:
-                    data_lines.append(data)
+                if event is not None:
+                    check_limits()
+                    yield event
     finally:
         done.set()
         try:

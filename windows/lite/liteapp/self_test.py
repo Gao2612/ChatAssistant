@@ -4,20 +4,38 @@ Runs only local, synthetic checks: writable data directory, DPAPI settings
 roundtrip, SQLite read/write, and required dependency imports. It never enumerates
 WeChat windows, never opens the real profile, never reads real chat data and never
 sends a model request.
+
+R-09 hardening: an explicit ``--data-dir`` is never written directly. A directory
+that looks like the real profile (``settings.json`` / ``memory.sqlite3`` /
+instance or recovery markers, or the default ``ChatAssistantLite`` name) is
+refused; otherwise the checks run inside a random ``selftest-<hex>`` subdirectory
+that is removed afterwards and the report marks ``isolated=false``.
 """
 from __future__ import annotations
 
 import argparse
 import json
 from pathlib import Path
+import shutil
 import sqlite3
 import sys
 import tempfile
+import uuid
 
 SCHEMA = 1
 REQUIRED_IMPORTS = ("PySide6", "numpy", "PIL", "sqlite3", "pypdf",
                     "rapidocr_onnxruntime", "windows_capture")
 OPTIONAL_IMPORTS = ("cryptography", "pypdfium2", "jwt")
+
+PROFILE_DIR_NAMES = ("ChatAssistantLite",)
+PROFILE_MARKERS = ("settings.json", "memory.sqlite3", "instance.json",
+                   "instance.lock", "recovery.key", "history-backups")
+
+
+def _looks_like_real_profile(base: Path) -> bool:
+    if base.name in PROFILE_DIR_NAMES:
+        return True
+    return any((base / marker).exists() for marker in PROFILE_MARKERS)
 
 
 def _check(checks, name, function):
@@ -29,17 +47,7 @@ def _check(checks, name, function):
                        "detail": f"{type(exc).__name__}: {str(exc)[:300]}"})
 
 
-def run(data_dir=None):
-    """Run the synthetic self-test; returns a JSON-serialisable report."""
-    temporary = None
-    if data_dir is None:
-        temporary = tempfile.TemporaryDirectory(prefix="chatassistant-selftest-")
-        base = Path(temporary.name)
-    else:
-        base = Path(data_dir)
-    base.mkdir(parents=True, exist_ok=True)
-    data = base / "data"
-    data.mkdir(parents=True, exist_ok=True)
+def _collect_checks(data: Path) -> list[dict]:
     checks = []
 
     def writable():
@@ -103,10 +111,45 @@ def run(data_dir=None):
             checks.append({"name": f"import:{name}", "ok": True, "detail": "可选依赖可导入"})
         except Exception:  # noqa: BLE001 - optional dependency may be absent
             checks.append({"name": f"import:{name}", "ok": True, "detail": "可选依赖未安装"})
-    if temporary is not None:
-        temporary.cleanup()
-    return {"schema": SCHEMA, "ok": all(item["ok"] for item in checks),
-            "isolated": data_dir is None, "checks": checks}
+    return checks
+
+
+def _isolation_failure(detail: str) -> dict:
+    return {"schema": SCHEMA, "ok": False, "isolated": False,
+            "checks": [{"name": "isolated_data_dir", "ok": False, "detail": detail}]}
+
+
+def run(data_dir=None):
+    """Run the synthetic self-test; returns a JSON-serialisable report."""
+    temporary = None
+    work_dir = None
+    isolated = data_dir is None
+    if data_dir is None:
+        temporary = tempfile.TemporaryDirectory(prefix="chatassistant-selftest-")
+        work_dir = Path(temporary.name)
+    else:
+        base = Path(data_dir)
+        try:
+            base.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            return _isolation_failure(
+                f"无法创建隔离自检目录：{type(exc).__name__}: {str(exc)[:300]}")
+        if _looks_like_real_profile(base):
+            return _isolation_failure(
+                "拒绝在疑似正式数据目录上运行自检（发现 settings.json/"
+                "memory.sqlite3 等标记）；请使用空白的隔离目录。")
+        work_dir = base / f"selftest-{uuid.uuid4().hex[:8]}"
+    try:
+        data = work_dir / "data"
+        data.mkdir(parents=True, exist_ok=True)
+        checks = _collect_checks(data)
+        return {"schema": SCHEMA, "ok": all(item["ok"] for item in checks),
+                "isolated": isolated, "checks": checks}
+    finally:
+        if temporary is not None:
+            temporary.cleanup()
+        elif work_dir is not None:
+            shutil.rmtree(work_dir, ignore_errors=True)
 
 
 def main(argv=None):

@@ -69,6 +69,7 @@ class ImportProgress:
     pages_done: int = 0
     page_issues: tuple[PageIssue, ...] = ()
     duplicate: bool = False
+    retried: bool = False
     support_level: str = ""
     format_kind: str = ""
     parser_name: str = ""
@@ -95,17 +96,19 @@ class ImportProgress:
 class _Job:
     _FIELDS = (
         "status", "phase", "record_count", "char_count", "page_count", "pages_done",
-        "page_issues", "duplicate", "support_level", "format_kind", "parser_name",
-        "source_id", "source_version", "memory_version", "error", "notes",
+        "page_issues", "duplicate", "retried", "support_level", "format_kind",
+        "parser_name", "source_id", "source_version", "memory_version", "error",
+        "notes",
     )
 
     def __init__(self, *, scope: ScopeKey, path: Path, enable_page_ocr: bool,
-                 clock: Callable[[], float]) -> None:
+                 clock: Callable[[], float], retry_source_id: str | None = None) -> None:
         self.job_id = uuid.uuid4().hex[:16]
         self.scope = scope
         self.path = Path(path)
         self.path_name = self.path.name
         self.enable_page_ocr = bool(enable_page_ocr)
+        self.retry_source_id = retry_source_id
         self.cancel = CancellationToken()
         self._clock = clock
         self.started_at = clock()
@@ -115,10 +118,10 @@ class _Job:
         self.values: dict[str, Any] = {
             "status": STATUS_QUEUED, "phase": STATUS_QUEUED,
             "record_count": 0, "char_count": 0, "page_count": 0, "pages_done": 0,
-            "page_issues": (), "duplicate": False, "support_level": "",
-            "format_kind": "", "parser_name": "", "source_id": None,
-            "source_version": None, "memory_version": None, "error": None,
-            "notes": (),
+            "page_issues": (), "duplicate": False, "retried": False,
+            "support_level": "", "format_kind": "", "parser_name": "",
+            "source_id": None, "source_version": None, "memory_version": None,
+            "error": None, "notes": (),
         }
 
     def update(self, **fields: Any) -> None:
@@ -166,19 +169,35 @@ class ImportJobs:
 
     # ------------------------------------------------------------------ public
     def start(self, scope: ScopeKey, path: Path | str,
-              enable_page_ocr: bool = False) -> str:
+              enable_page_ocr: bool = False, *,
+              retry_source_id: str | None = None) -> str:
         if not isinstance(scope, ScopeKey):
             raise TypeError("scope 必须是 ScopeKey；导入不接受 person_id 快捷入口。")
         if not isinstance(enable_page_ocr, bool):
             raise TypeError("enable_page_ocr 必须是布尔值。")
+        if retry_source_id is not None:
+            self._require_retry_source(scope, retry_source_id)
         job = _Job(scope=scope, path=Path(path), enable_page_ocr=enable_page_ocr,
-                   clock=self.clock)
+                   clock=self.clock, retry_source_id=retry_source_id)
         with self._lock:
             self._jobs[job.job_id] = job
         job.thread = threading.Thread(target=self._execute, args=(job,), daemon=True,
                                       name=f"import-{job.job_id}")
         job.thread.start()
         return job.job_id
+
+    def start_retry(self, scope: ScopeKey, source_id: str, path: Path | str,
+                    enable_page_ocr: bool = False) -> str:
+        """Retry the failed pages of one existing source (R-04).
+
+        The whole file is parsed again in the controlled parser; the store merges
+        the newly parsed pages with the records recovered by the previous import,
+        so successful pages are neither duplicated nor lost.
+        """
+        if not isinstance(scope, ScopeKey):
+            raise TypeError("scope 必须是 ScopeKey；导入不接受 person_id 快捷入口。")
+        self._require_retry_source(scope, source_id)
+        return self.start(scope, path, enable_page_ocr, retry_source_id=source_id)
 
     def progress(self, job_id: str) -> ImportProgress:
         return self._job(job_id).snapshot()
@@ -198,18 +217,28 @@ class ImportJobs:
             time.sleep(0.01)
 
     def run_sync(self, scope: ScopeKey, path: Path | str,
-                 enable_page_ocr: bool = False) -> ImportProgress:
+                 enable_page_ocr: bool = False, *,
+                 retry_source_id: str | None = None) -> ImportProgress:
         """Run one import on the calling thread (tests / explicit small-file path)."""
         if not isinstance(scope, ScopeKey):
             raise TypeError("scope 必须是 ScopeKey；导入不接受 person_id 快捷入口。")
         if not isinstance(enable_page_ocr, bool):
             raise TypeError("enable_page_ocr 必须是布尔值。")
+        if retry_source_id is not None:
+            self._require_retry_source(scope, retry_source_id)
         job = _Job(scope=scope, path=Path(path), enable_page_ocr=enable_page_ocr,
-                   clock=self.clock)
+                   clock=self.clock, retry_source_id=retry_source_id)
         with self._lock:
             self._jobs[job.job_id] = job
         self._execute(job)
         return job.snapshot()
+
+    def _require_retry_source(self, scope: ScopeKey, source_id: Any) -> None:
+        if not isinstance(source_id, str) or not source_id.strip():
+            raise ImportJobError("重试导入必须指定已有来源 source_id。")
+        known = {source.source_id for source in self.store.list_sources(scope)}
+        if source_id not in known:
+            raise ImportJobError("要重试的来源不存在或不属于当前范围。")
 
     def active_job_ids(self) -> tuple[str, ...]:
         with self._lock:
@@ -270,11 +299,14 @@ class ImportJobs:
                    page_issues=tuple(parser.page_issues))
         source = ImportSource(digest=digest, kind=match.kind, name=path.name,
                               page_count=parser.page_count,
-                              page_issues=tuple(parser.page_issues))
-        result = self.store.import_records(job.scope, source, records)
+                              page_issues=tuple(parser.page_issues),
+                              source_id=job.retry_source_id)
+        result = self.store.import_records(job.scope, source, records,
+                                           retry=job.retry_source_id is not None)
         job.finish(STATUS_SUCCEEDED, "done", record_count=result.record_count,
                    char_count=result.char_count, page_count=result.page_count,
                    pages_done=max(pages_done, parser.pages_done),
                    page_issues=result.page_issues, duplicate=result.duplicate,
+                   retried=result.retried,
                    source_id=result.source_id, source_version=result.source_version,
                    memory_version=result.memory_version, error=None)

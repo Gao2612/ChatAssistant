@@ -405,6 +405,8 @@ class ImportResult:
     source_version: int
     memory_version: int
     page_issues: tuple[PageIssue, ...] = ()
+    retried: bool = False
+    """True when this import retried failed pages of an existing source (R-04)."""
 
     def __post_init__(self) -> None:
         _require_text(self.source_id, "source_id", 128)
@@ -413,6 +415,8 @@ class ImportResult:
         for name in ("record_count", "char_count", "page_count", "failure_count",
                      "source_version", "memory_version"):
             _require_int(getattr(self, name), name)
+        if not isinstance(self.retried, bool):
+            raise TypeError("retried 必须是布尔值。")
         object.__setattr__(self, "page_issues", tuple(self.page_issues or ()))
 
 

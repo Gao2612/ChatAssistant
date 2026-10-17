@@ -271,6 +271,32 @@ class TransportTimeoutTests(InferenceTestCase):
             gateway.run(request(instructions="sys", input="用户文字"))
         self.assertIn("过大", str(raised.exception))
 
+    def test_oversized_single_sse_line_is_rejected_without_unbounded_buffering(self):
+        """R-05: one 8 MB SSE line must not be buffered before the 256 KB cap applies."""
+        import tracemalloc
+
+        cap = 256 * 1024
+        oversized = b"data: " + b"x" * (8 * 1024 * 1024) + b"\n\n"
+
+        def responder(_record):
+            return {"content_type": "text/event-stream",
+                    "stream": [{"data": oversized}]}
+
+        server = FakeHttpServer(responder)
+        self.addCleanup(server.close)
+        gateway = self.gateway(chatgpt_profile(server.url + "/v1/responses"),
+                               max_response_bytes=cap)
+        tracemalloc.start()
+        try:
+            with self.assertRaises(inference.InferenceProtocolError) as raised:
+                self.run_chatgpt(server, gateway=gateway)
+            _, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        self.assertIn("过大", str(raised.exception))
+        self.assertLess(peak, 2 * 1024 * 1024,
+                        f"超大单行响应峰值内存 {peak} B，未按有界读取上限 {cap} B 提前中止")
+
 
 class TransportErrorMappingTests(InferenceTestCase):
     def error_server(self, status, payload=None):
@@ -296,6 +322,17 @@ class TransportErrorMappingTests(InferenceTestCase):
                 gateway = self.gateway(chatgpt_profile(server.url + "/v1/responses"))
                 with self.assertRaises(inference.InferenceTransientError):
                     gateway.run(request(instructions="sys", input="用户文字"))
+
+    def test_http_400_suggests_reading_the_model_catalog(self):
+        """HTTP 400 usually means the configured model slug is unknown to the provider."""
+        server = self.error_server(400)
+        gateway = self.gateway(chatgpt_profile(server.url + "/v1/responses"))
+        with self.assertRaises(inference.InferenceProtocolError) as raised:
+            gateway.run(request(instructions="sys", input="用户文字"))
+        message = str(raised.exception)
+        self.assertIn("HTTP 400", message)
+        self.assertIn("读取模型列表", message)
+        self.assertIn("模型名称", message)
 
     def test_redirect_is_refused_without_forwarding_credentials_or_payload(self):
         target = FakeHttpServer(lambda _record: {"status": 200, "body": b"{}"})
@@ -441,6 +478,7 @@ class SchemaTests(InferenceTestCase):
                              records=[{"record_id": "r1", "text": "客户要求周五前报价"}])
 
     def test_history_extract_rejects_missing_or_inverted_evidence(self):
+        records = [{"record_id": "r1", "text": "客户要求周五前报价"}]
         for item in (
             {"category": "fact", "text": "没有证据", "evidence": []},
             {"category": "fact", "text": "倒置范围", "evidence": [{"record_id": "r1", "start": 5, "end": 2}]},
@@ -451,19 +489,51 @@ class SchemaTests(InferenceTestCase):
                 self.addCleanup(server.close)
                 with self.assertRaises(inference.InferenceProtocolError):
                     self.run_chatgpt(server, kind=inference_schemas.KIND_HISTORY_EXTRACT,
-                                     instructions="提取", input="合成历史")
+                                     instructions="提取", input="合成历史",
+                                     records=records)
+
+    def test_history_extract_without_records_is_rejected(self):
+        """R-06: history kinds must fail closed when the evidence scope is absent."""
+        server = chatgpt_server([delta_event(HISTORY_EXTRACT_JSON), completed_event()])
+        self.addCleanup(server.close)
+        with self.assertRaises(inference.InferenceProtocolError):
+            self.run_chatgpt(server, kind=inference_schemas.KIND_HISTORY_EXTRACT,
+                             instructions="提取", input="合成历史")
+
+    def test_history_reduce_without_records_is_rejected(self):
+        server = chatgpt_server([delta_event(HISTORY_REDUCE_JSON), completed_event()])
+        self.addCleanup(server.close)
+        with self.assertRaises(inference.InferenceProtocolError):
+            self.run_chatgpt(server, kind=inference_schemas.KIND_HISTORY_REDUCE,
+                             instructions="合并", input="合成批次摘要")
+
+    def test_history_extract_records_must_be_unique_and_typed(self):
+        for records in (
+            [{"record_id": "r1", "text": "第一条"},
+             {"record_id": "r1", "text": "重复的 record_id"}],
+            [{"record_id": "r1", "text": "第一条"}, "not-a-mapping"],
+            [{"record_id": "r1", "text": 123}],
+            [],
+        ):
+            with self.subTest(records=records):
+                server = chatgpt_server([delta_event(HISTORY_EXTRACT_JSON), completed_event()])
+                self.addCleanup(server.close)
+                with self.assertRaises(inference.InferenceProtocolError):
+                    self.run_chatgpt(server, kind=inference_schemas.KIND_HISTORY_EXTRACT,
+                                     instructions="提取", input="合成历史", records=records)
 
     def test_history_reduce_schema_validates_summary_and_evidence(self):
+        records = [{"record_id": "r1", "text": "客户询问报价"}]
         server = chatgpt_server([delta_event(HISTORY_REDUCE_JSON), completed_event()])
         self.addCleanup(server.close)
         result = self.run_chatgpt(server, kind=inference_schemas.KIND_HISTORY_REDUCE,
-                                  instructions="合并", input="合成批次摘要")
+                                  instructions="合并", input="合成批次摘要", records=records)
         self.assertEqual(result.validated_data["summary"], "客户关注报价与交期。")
         broken = chatgpt_server([delta_event(json.dumps({"summary": ""})), completed_event()])
         self.addCleanup(broken.close)
         with self.assertRaises(inference.InferenceProtocolError):
             self.run_chatgpt(broken, kind=inference_schemas.KIND_HISTORY_REDUCE,
-                             instructions="合并", input="合成批次摘要")
+                             instructions="合并", input="合成批次摘要", records=records)
 
     def test_unknown_profile_and_backend_are_rejected(self):
         gateway = inference.InferenceGateway()
