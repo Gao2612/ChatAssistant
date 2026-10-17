@@ -789,9 +789,9 @@ class MainWindow(QMainWindow):
     def __init__(self, config=None, scanning=True, window_manager=None, account_store=None,
                  inference_queue=None):
         super().__init__()
-        self.setWindowTitle("微信实时助手 · 便捷版 0.5.0")
-        self.resize(1180, 680)
-        self.setMinimumSize(980, 600)
+        self.setWindowTitle("微信实时助手 · 便捷版 0.5.1")
+        self.resize(1000, 520)
+        self.setMinimumSize(900, 500)
         self.setStyleSheet(STYLE)
         self.config = config if config is not None else settings.load()
         self._account_store = account_store
