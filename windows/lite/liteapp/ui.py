@@ -789,7 +789,7 @@ class MainWindow(QMainWindow):
     def __init__(self, config=None, scanning=True, window_manager=None, account_store=None,
                  inference_queue=None):
         super().__init__()
-        self.setWindowTitle("微信实时助手 · 便捷版 0.5.3")
+        self.setWindowTitle("微信实时助手 · 便捷版 0.5.4")
         self.resize(1000, 520)
         self.setMinimumSize(900, 500)
         self.setStyleSheet(STYLE)
@@ -1477,12 +1477,29 @@ class MainWindow(QMainWindow):
             self.windows.blockSignals(False)
             self.last_keys = keys
         if self.window_item and not any(x["id"] == self.window_item["id"] for x in items):
-            self.stop_capture()
-            self.window_item = None
-            self.state.connect(None)
-            self.set_editor("")
-            self.chat_title.setText("微信窗口已关闭")
-            self.clear_results()
+            hidden = None
+            try:
+                hidden = next(
+                    (w for w in find_wechat_windows(
+                        path or self.config["wechat_path"], include_hidden=True)
+                     if int(w["hwnd"]) == int(self.window_item["hwnd"])),
+                    None)
+            except (OSError, ValueError):
+                hidden = None
+            if hidden is not None:
+                # Closing WeChat to the tray must not tear down the capture worker:
+                # the worker switches to the off-screen PrintWindow path and keeps
+                # reading the same window without activating it.
+                self.window_item = hidden
+                self.set_connection_status(
+                    "微信已隐藏到托盘，仍在后台读取；点击“启动微信”可恢复窗口。")
+            else:
+                self.stop_capture()
+                self.window_item = None
+                self.state.connect(None)
+                self.set_editor("")
+                self.chat_title.setText("微信窗口已关闭")
+                self.clear_results()
         if not self.window_item and not self.user_paused:
             candidate = choose_window(items, None)
             if candidate and self.config["auto_connect"]:
