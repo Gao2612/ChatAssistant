@@ -152,3 +152,10 @@
 - Git `ac23099`（clean）、128 个源文件；`--version-json` 0.5.5；隔离 `--self-test` exit 0；`--smoke` exit 0；`package.ps1 -VerifyInstall` ok=true；已覆盖安装到 `E:\ChatAssistantLite`
 - 点4 真实验证：连续两次关闭/重开 App，设置页均显示“已连接 ChatGPT：ch…@163.com”，账号记录与授权保留，不触发浏览器授权；`chatgpt_model` 选择现在在点选时立即持久化（`settings.remember_model`，不触碰凭据），重开 App 保留
 - 全量 665 项测试 exit 0
+### UI 内自动找对话自动探测（0.5.5，2026-10-18）
+
+- 自动连接后通过应用自己的设置页按钮（UIA InvokePattern）触发自动查找：
+  - “田子夜”：应用内返回“搜索结果里没有找到该联系人”，未切换、未发送；同一真实窗口用代码级 `find_conversation` 直接调用仍是 `ok=true`（约 11s）
+  - “文件传输助手”同样返回未找到
+- 判断：跨进程 UIA 触发时，搜索框/结果时序与真实人工点击不同（可能搜索覆盖层未刷新）；代码级真实验收已通过，但“应用内点击”路径仍需人工复验。
+- 结论：S-V10 保持未签收；人工点击是最终判据，不以该自动探测结果写通过。
