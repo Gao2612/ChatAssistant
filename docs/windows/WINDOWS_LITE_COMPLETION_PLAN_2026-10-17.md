@@ -132,7 +132,7 @@ WindowManager.capture_health(source: SourceKey) -> CaptureHealth
 - [x] 恢复守护只接受原助手创建的恢复记录；主程序异常退出后验证身份再恢复几何；原微信关闭后不能误操作复用 HWND。
 - [x] 运行 `python -m unittest tests.test_window_dock tests.test_window_manager tests.test_discovery -v`；可见合成测试输出各场景结果，真实微信输入法/扫码在 T12 集中做。
 
-> 2026-10-18 完成：`window_manager.py`（停靠/视图/健康/物理↔DIP ≤2px/弹窗只读回退/登录接替/恢复记录）、`recovery_guard.py`（HMAC 恢复记录 + 独立守护子进程，异常退出先验 exe/PID/启动时刻/HWND）、`native_chat_fixture.py` 合成窗口（文本变化/弹窗/resize/最小化/关闭/登录接替）；`discovery/window_dock/worker/main` 加固。定向 100 项通过（含真实窗口三窗口遮挡回归、120DPI、跨进程恢复）；排除并行 WIP 模块 315 项通过；隔离 smoke exit 0。**ui.py 尚未接入 WindowManager（Lead 集成，见 PROGRESS T4-UI）**；真实输入法/扫码/多开留 T12。
+> 2026-10-18 完成：`window_manager.py`（停靠/视图/健康/物理↔DIP ≤2px/弹窗只读回退/登录接替/恢复记录）、`recovery_guard.py`（HMAC 恢复记录 + 独立守护子进程，异常退出先验 exe/PID/启动时刻/HWND）、`native_chat_fixture.py` 合成窗口（文本变化/弹窗/resize/最小化/关闭/登录接替）；`discovery/window_dock/worker/main` 加固。定向 100 项通过（含真实窗口三窗口遮挡回归、120DPI、跨进程恢复）；排除并行 WIP 模块 315 项通过；隔离 smoke exit 0。**ui.py 已接入 WindowManager（T4-UI，commit `403c526`）**，含弹窗/最小化/过期画面时的只读回退与 R-07 句柄校验；真实输入法/扫码/多开留 T12。
 
 ## T5：历史数据 V2 与强制范围校验
 
@@ -178,7 +178,7 @@ ImportJobs.progress(job_id: str) -> ImportProgress
 - [x] 运行 `python -m unittest tests.test_importers tests.test_history_v2 -v`；用 10,000 条合成记录验证首/中/尾引用可跳回原文，并记录导入时长。
 
 
-> 2026-10-18 完成：`importers/{base,html_generic,exportwechat_html,pdf}.py` + `import_jobs.py`；HTML 纯文本/编码/上限/取消，PDF 用 pypdfium2 受控子进程（150 DPI / 每页 ≤1200 万像素 / 页级 30s 超时后下一页重启续传，仅无文字页本地 OCR，原图不落盘），`history_ui.py` 最小导入任务 UI；`requirements.txt` 固定 `pypdfium2>=5.14,<6`，许可与 version.json 入 `licenses/pypdfium2/`。定向 58 项、全套 376 项通过；10,000 条合成记录首/中/尾引用可回原文。**ExportWeChat 无真实样本，SAMPLE_VERIFIED=False，不标精确支持**；frozen 模式的 `--lite-pdf-worker` 分发列入 T11 打包缺口。
+> 2026-10-18 完成：`importers/{base,html_generic,exportwechat_html,pdf}.py` + `import_jobs.py`；HTML 纯文本/编码/上限/取消，PDF 用 pypdfium2 受控子进程（150 DPI / 每页 ≤1200 万像素 / 页级 30s 超时后下一页重启续传，仅无文字页本地 OCR，原图不落盘），`history_ui.py` 最小导入任务 UI；`requirements.txt` 固定 `pypdfium2>=5.14,<6`，许可与 version.json 入 `licenses/pypdfium2/`。定向 58 项、全套 376 项通过；10,000 条合成记录首/中/尾引用可回原文。**ExportWeChat 无真实样本，SAMPLE_VERIFIED=False，不标精确支持**；frozen 模式的 `--lite-pdf-worker` 分发已在 T11 `617a89f` 完成；超时页重试已由 P2 `4cb2268` 实现（UI 入口待 T12）。
 ## T7：可恢复的全量历史模型分析
 
 **Files:** 新建 `liteapp/history_jobs.py`、`history_prompts.py`、`history_analysis_store.py`；使用 T3/T5 接口；新增 `tests/test_history_jobs.py`、`tests/test_history_coverage.py`。

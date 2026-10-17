@@ -106,7 +106,7 @@ flowchart LR
 - `window_manager.py` 统一停靠/视图（chat/settings/history/minimized）/健康状态与恢复记录；物理↔DIP 往返误差 ≤2px；弹窗出现时暂停停靠并只读回退；仅在本助手为激活组时修复 Z 序，不循环抢焦点、不 SetParent；登录窗口→主窗口同进程可信接替。
 - `recovery_guard.py` 用 HMAC 签名恢复记录 + 独立守护子进程：主程序异常退出后先验证 exe/PID/启动时刻/HWND 再恢复；正常退出只清理不恢复；原微信关闭/HWND 复用零操作。
 - `discovery.py` 增加 valid_source/classify_window/popup/zorder/foreground/source_kind 与 discover 的 kind/dpi；`window_dock.py` 句柄复用拒绝、2px 容差回滚、弹窗暂停、用户拖动不抢、detach 恢复几何+最小化；`worker.py` 上报 popup/minimized；`main.py` 守护生命周期与 `--recovery-guard` 分流。
-- UI 尚未接入 WindowManager（当前仍用加固后的 WindowDock）；集成由 Lead 在 ui.py 完成。真实输入法/扫码/多开/真实弹窗留 T12。
+- UI 已接入 WindowManager（T4-UI，commit `403c526`）：页面切换 set_view、健康状态关开口只读回退、tick 新鲜度、断开/关闭 detach；R-07 的 after=0 与无效 host/aperture 已 fail-closed。真实输入法/扫码/多开/真实弹窗留 T12。
 
 ## 6. ChatGPT 授权、模型和请求队列
 
@@ -196,7 +196,7 @@ HTML 不执行脚本、不取远程资源、不自动打开附件。PDF 保留�
 ### 7.2.1 实现补充（2026-10-18，T6）
 
 - 新增 `importers/{base,html_generic,exportwechat_html,pdf}.py` 与 `import_jobs.py`：HTML 纯文本解析（UTF-8/UTF-16/GB18030、不执行脚本/不请求远程、30s/100MB/行数上限、取消）；PDF 用 pypdfium2 受控子进程（150 DPI、每页 ≤1200 万像素、页级 30s 超时记录 issue 后下一页重启续传 ordinal），仅无文字页走本地 OCR，原图只在内存不落盘，损坏/密码页给页级问题；ExportWeChat 目前只做签名探测 + 通用回退，无真实样本时 `SAMPLE_VERIFIED=False`，不标“精确支持”。
-- `history_ui.py` 接入最小导入任务 UI（后台导入、取消、“扫描页本地 OCR”、进度与页级问题）；`requirements.txt` 固定 `pypdfium2>=5.14,<6`，PDFium 许可与 version.json 入 `licenses/pypdfium2/`。frozen 打包需 T11 在 `main.py` 分发 `--lite-pdf-worker`。
+- `history_ui.py` 接入最小导入任务 UI（后台导入、取消、“扫描页本地 OCR”、进度与页级问题）；`requirements.txt` 固定 `pypdfium2>=5.14,<6`，PDFium 许可与 version.json 入 `licenses/pypdfium2/`。frozen 打包需 T11 在 `main.py` 分发 `--lite-pdf-worker`（已由 `617a89f` 完成）；超时页重试由 P2 `4cb2268` 提供后端入口（UI 按钮与真实扫描 PDF 验收留 T12）。
 
 ### 7.3 全量模型分析
 
