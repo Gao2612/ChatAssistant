@@ -133,3 +133,10 @@
 - D-UI：状态行单行可见（连接状态 / 后端+模型 / 分析状态）；1000×520 窗口 / 900×500 最小，小屏不裁切；截图见 `windows/lite/test-output/final-chat.png`
 - 全量 660 项测试 exit 0
 - 人工 T12 清单见 `docs/windows/T12_MANUAL_ACCEPTANCE_HANDOFF_2026-10-18.md`
+### 候选包 0.5.4（托盘保留修复，2026-10-18）
+
+- 版本 0.5.4；安装包 SHA-256 `5F5DE851805B8E25894DDB14D615BCF98F0374799AD49457153F9E009AAE8832`
+- Git `96e39a2`（clean）、127 个源文件；`--version-json` 0.5.4；隔离 `--self-test` exit 0；`--smoke` exit 0；`package.ps1 -VerifyInstall` install/self-test/uninstall/保留数据 `ok=true`
+- 修复：微信关闭到托盘后，扫描不再断开采集；同一 hwnd 存在隐藏窗口时保留连接并提示“微信已隐藏到托盘，仍在后台读取”。真实自动连接后隐藏窗口：状态文案出现（“仍在后台读取”/“暂时无法读取画面”），恢复后微信重新可见；自动连接设置已还原。
+- 自动检查中未稳定取到识别文字长度（UIA 读 QPlainTextEdit 内容不稳定），托盘隐藏时的实际 OCR 文字需人工看界面确认；worker 隐藏捕获路径有单测覆盖。
+- 全量 662 项测试 exit 0
