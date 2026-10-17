@@ -306,7 +306,21 @@ class Win32Backend:
                     u32.SwitchToThisWindow(hwnd, True)
                 except OSError:
                     pass
-            return int(u32.GetForegroundWindow() or 0) == hwnd
+            # SetForegroundWindow may report failure before the foreground change
+            # actually settles; poll for up to ~2.5s, then retry once.
+            for _ in range(80):
+                if int(u32.GetForegroundWindow() or 0) == hwnd:
+                    return True
+                time.sleep(0.03)
+            try:
+                u32.SetForegroundWindow(hwnd)
+            except OSError:
+                pass
+            for _ in range(30):
+                if int(u32.GetForegroundWindow() or 0) == hwnd:
+                    return True
+                time.sleep(0.03)
+            return False
         except (OSError, ValueError):
             return False
 
