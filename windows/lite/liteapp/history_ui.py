@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import Signal, QTimer
 from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -50,6 +50,7 @@ DEFAULT_ACCOUNT_KEY = "本机默认账号"
 
 class HistoryPage(QWidget):
     PAGE_SIZE = 100
+    bind_current_requested = Signal()
 
     def __init__(self, store=None, parent=None):
         super().__init__(parent)
@@ -83,6 +84,11 @@ class HistoryPage(QWidget):
         self.import_button = QPushButton("导入聊天记录")
         self.import_button.clicked.connect(self.choose_file)
         contact_row.addWidget(self.import_button)
+        self.bind_current_button = QPushButton("关联当前微信会话")
+        self.bind_current_button.setToolTip(
+            "把当前微信窗口里的会话绑定到这个联系人；切换会话或窗口重启后需要重新关联。")
+        self.bind_current_button.clicked.connect(self.bind_current_requested.emit)
+        contact_row.addWidget(self.bind_current_button)
         self.cancel_import_button = QPushButton("取消导入")
         self.cancel_import_button.setEnabled(False)
         self.cancel_import_button.clicked.connect(self.cancel_active_import)

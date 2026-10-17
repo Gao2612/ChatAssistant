@@ -716,6 +716,14 @@ class MainWindow(QMainWindow):
         self._style_profile = None
         self.style_busy = False
         self.wechat_busy = False
+        # T9: stable conversation bindings + local memory retrieval.
+        from .conversation_binding import ConversationBindings
+        self.bindings = ConversationBindings()
+        self.conversation_epoch = 0
+        self._epoch_title = ""
+        self._memory_retriever = None
+        self._last_memory_count = 0
+        self._last_memory_context = None
         self.state = ConversationState()
         self.child = self.stop_event = self.capture_q = None
         self.window_item = None
@@ -865,6 +873,11 @@ class MainWindow(QMainWindow):
         self.summary.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         sum_layout.addWidget(self.summary)
         result_layout.addWidget(summary_group)
+        self.memory_button = QPushButton("参考历史：未关联")
+        self.memory_button.setEnabled(False)
+        self.memory_button.setToolTip("只检索已关联联系人档案中的本地历史；未关联时不检索任何人")
+        self.memory_button.clicked.connect(self.show_memory_context)
+        result_layout.addWidget(self.memory_button)
         self.reply_boxes, self.copy_buttons, self.send_buttons = [], [], []
         for i in range(3):
             group = QGroupBox(f"回复建议 {i + 1}")
@@ -904,6 +917,7 @@ class MainWindow(QMainWindow):
         self.refresh_effective_model()
         self.page_stack.addWidget(self.settings_page)
         self.history_page = HistoryPage()
+        self.history_page.bind_current_requested.connect(self.bind_current_conversation)
         self.page_stack.addWidget(self.history_page)
         self.windows = self.settings_page.windows
         self.connect_button = self.settings_page.connect_button
@@ -1342,6 +1356,8 @@ class MainWindow(QMainWindow):
         self.capture_session = uuid.uuid4().hex
         self.state.connect(self.capture_session)
         self._clear_recent()
+        self.conversation_epoch += 1
+        self._epoch_title = ""
         self.set_editor("")
         self.clear_results()
         self.reading_ok_token = None
@@ -1450,6 +1466,7 @@ class MainWindow(QMainWindow):
                             continue
                     changed = self.state.update(packet["title"], packet["messages"])
                     self._remember_recent(packet["title"], packet["messages"])
+                    self._note_conversation_title(packet["title"])
                     if changed and manager is not None and source is not None:
                         manager.record_frame(source, changed=True)
                     self.chat_title.setText(packet["title"])
@@ -1580,17 +1597,23 @@ class MainWindow(QMainWindow):
         # Prefer the accumulated recent transcript (viewport-overlap merged across
         # frames) over the current OCR crop; fall back to the visible editor text.
         text = self._recent_transcript() or self.editor.toPlainText()
+        memory_note = self._memory_context_text(text)
+        text_for_model = text + memory_note
         cfg = dict(self.config, relationship="普通联系人")
         cfg["model"] = backends.effective_model(cfg)
         self.busy = True
-        self.analysis_status.setText("正在分析…")
+        if memory_note:
+            self.analysis_status.setText(
+                f"正在分析（参考历史 {self._last_memory_count} 条）…")
+        else:
+            self.analysis_status.setText("正在分析…")
         self.last_analysis = time.monotonic()
         self.last_auto_token = token
         self.set_notice("正在分析当前可见对话；切换会话会使本次结果失效。")
         if backends.analysis_backend(cfg) == "codex":
             def work():
                 try:
-                    result = codex_backend.analyze(cfg, text)
+                    result = codex_backend.analyze(cfg, text_for_model)
                     error = ""
                 except Exception as e:  # noqa: BLE001 - UI thread reports the message
                     result, error = None, (
@@ -1599,7 +1622,7 @@ class MainWindow(QMainWindow):
             threading.Thread(target=work, daemon=True).start()
             return
         try:
-            request = self._analysis_request(cfg, text)
+            request = self._analysis_request(cfg, text_for_model)
             handle = self.inference_queue.submit(
                 request, scope_id=self._queue_scope_id())
         except (TypeError, ValueError) as exc:
@@ -1690,6 +1713,100 @@ class MainWindow(QMainWindow):
 
     def refresh_effective_model(self):
         self.effective_label.setText("分析：" + backends.describe_analysis(self.config))
+
+    def show_memory_context(self):
+        context = self._last_memory_context
+        if context is None or not context.items:
+            self.set_notice("当前会话没有可展示的历史参考；请先在历史页关联联系人档案。")
+            return
+        lines = []
+        for index, item in enumerate(context.items, 1):
+            source = item.source_name or "已导入记录"
+            lines.append(f"{index}. [{source}] {item.text}")
+        lines.append("\n以上内容来自已导入的本地历史，只帮助措辞与上下文；不是当前事实。")
+        QMessageBox.information(self, f"参考历史（{len(context.items)} 条）",
+                                "\n\n".join(lines))
+
+    # ---- T9: conversation binding + local memory retrieval ------------------
+    def _current_source(self):
+        item = self.window_item
+        if not item:
+            return None
+        try:
+            return SourceKey(exe_path=str(item.get("path") or ""),
+                             pid=int(item["pid"]),
+                             process_started=float(item["created"]),
+                             hwnd=int(item["hwnd"]))
+        except (KeyError, TypeError, ValueError):
+            return None
+
+    def _note_conversation_title(self, title):
+        title = str(title or "").strip()
+        if title and title != self._epoch_title:
+            self._epoch_title = title
+            self.conversation_epoch += 1
+
+    def _bound_scope(self):
+        source = self._current_source()
+        if source is None:
+            return None
+        binding = self.bindings.resolve(source, self.conversation_epoch)
+        return binding.scope if binding is not None else None
+
+    def bind_current_conversation(self):
+        scope = self.history_page.current_scope()
+        source = self._current_source()
+        if scope is None:
+            self.set_notice("请先在历史页选择联系人，再把当前微信会话关联到该档案。")
+            return
+        if source is None:
+            self.set_notice("请先连接微信窗口，再关联当前会话。")
+            return
+        if not self._epoch_title:
+            self.set_notice("会话标题还未确认，请等待识别出会话名后再关联。")
+            return
+        binding = self.bindings.bind(source, self.conversation_epoch, scope)
+        self.set_notice(
+            f"已把当前会话“{self._epoch_title}”关联到该联系人档案；"
+            "切换会话或窗口重启后需要重新关联，未关联时不会检索任何人的历史。")
+        try:
+            self.history_page.status.setText(f"已关联当前会话（版本 {binding.revision}）。")
+        except (RuntimeError, AttributeError):
+            pass
+
+    def _memory_context_text(self, text):
+        scope = self._bound_scope()
+        if scope is None:
+            self._last_memory_count = 0
+            self._last_memory_context = None
+            self.memory_button.setText("参考历史：未关联")
+            self.memory_button.setEnabled(False)
+            return ""
+        try:
+            from .memory_retrieval import MemoryRetriever
+            if self._memory_retriever is None:
+                self._memory_retriever = MemoryRetriever(self.history_page.store)
+            snapshot = self.history_page.store.snapshot(scope)
+            context = self._memory_retriever.retrieve(
+                scope, text[-400:], snapshot.memory_version)
+        except (ValueError, OSError):
+            self._last_memory_count = 0
+            self._last_memory_context = None
+            self.memory_button.setText("参考历史：读取失败")
+            self.memory_button.setEnabled(False)
+            return ""
+        self._last_memory_count = len(context.items)
+        self._last_memory_context = context
+        if not context.items:
+            self.memory_button.setText("参考历史：0 条")
+            self.memory_button.setEnabled(False)
+            return ""
+        self.memory_button.setText(f"参考历史：{len(context.items)} 条（点击查看）")
+        self.memory_button.setEnabled(True)
+        lines = [f"- {item.text}" for item in context.items]
+        return ("\n\n[历史参考：{} 条，来自已导入聊天记录；仅帮助措辞与上下文，"
+                "不是当前事实，也不代表过时信息仍有效]\n".format(len(lines))
+                + "\n".join(lines))
 
     # ---- WeChat auto actions (only on explicit user click; fail closed) -----
     def _connected_hwnd(self):
@@ -2245,6 +2362,7 @@ class MainWindow(QMainWindow):
             title, messages = result
             changed = self.state.update(title, messages)
             self._remember_recent(title, messages)
+            self._note_conversation_title(title)
             if title:
                 self.chat_title.setText(title)
             self.set_editor(self.state.text)
@@ -2369,7 +2487,11 @@ class MainWindow(QMainWindow):
         for button in getattr(self, "send_buttons", []):
             button.setEnabled(True)
         self.displayed_token = token
-        self.analysis_status.setText("已生成 3 条建议")
+        if self._last_memory_count:
+            self.analysis_status.setText(
+                f"已生成 3 条建议（参考历史 {self._last_memory_count} 条）")
+        else:
+            self.analysis_status.setText("已生成 3 条建议")
         self.ai_toggle.setToolTip("有新的 AI 建议，点击展开")
         self.set_notice("分析完成。请核对建议后复制，再由你手动发送。")
 
