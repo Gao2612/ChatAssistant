@@ -18,12 +18,13 @@ from PySide6.QtWidgets import (
 )
 from . import settings
 from .analysis import analyze
+from .contracts import SourceKey
 from .state import ConversationState, FrameFreshness, choose_window
-from .discovery import discover, minimized
+from .discovery import WindowTarget, discover, dpi
 from .worker import run as capture_run
 from . import analysis, backends, codex_backend, reading, subscription
 from .history_ui import HistoryPage
-from .window_dock import WindowDock
+from .window_manager import WindowManager, rect_to_physical
 
 STYLE = """
 QWidget { font-family: "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", sans-serif; font-size: 13px; color: #203044; }
@@ -503,7 +504,7 @@ class BrandMark(QWidget):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, config=None, scanning=True):
+    def __init__(self, config=None, scanning=True, window_manager=None):
         super().__init__()
         self.setWindowTitle("微信实时助手 · 便捷版 0.3.1")
         self.resize(1180, 790)
@@ -531,8 +532,14 @@ class MainWindow(QMainWindow):
         self.reading_busy = False
         self.pending_read = None
         self.last_ocr_snapshot = None
-        self.dock = WindowDock()
-        self.wechat_hidden_with_app = False
+        # T4-UI: all native docking goes through WindowManager. A recovery store
+        # under the application data directory lets the crash guard restore the
+        # managed window after an abnormal exit (records are signed; no chat
+        # content is stored). Tests may inject a fake manager.
+        self.window_manager = (window_manager if window_manager is not None
+                               else self._create_window_manager())
+        self._dock_message = None
+        self._aperture_open = False
         self.bus = ResultBus()
         self.bus.done.connect(self.analysis_done)
         self.bus.subscription_done.connect(self.subscription_done)
@@ -723,41 +730,188 @@ class MainWindow(QMainWindow):
         self.preview.clear()
         self.preview.setText("连接微信后在这里显示实时画面")
 
-    def undock(self):
-        self.dock.detach()
-        self.clearMask()
+    # -- native docking: WindowManager + capture health (T4-UI) -------------
+    @staticmethod
+    def _create_window_manager():
+        """WindowManager with signed crash-recovery records under the app data dir."""
+        recovery = None
+        try:
+            from .recovery_guard import RecoveryStore
+            recovery = RecoveryStore(settings.data_dir())
+        except (OSError, ImportError):
+            recovery = None
+        return WindowManager(recovery_store=recovery)
 
-    def sync_dock(self):
-        if not self.window_item:
-            if self.dock.active:
-                self.undock()
-            return
-        target = self.window_item["hwnd"]
-        chat_visible = (self.isVisible() and not self.isMinimized()
-                        and self.page_stack.currentWidget() is self.chat_page)
-        if not chat_visible:
-            if self.dock.active:
-                self.undock()
-            if not self.wechat_hidden_with_app:
-                self.wechat_hidden_with_app = self.dock.set_minimized(target, True)
-            return
-        if minimized(target):
-            if not self.dock.set_minimized(target, False):
-                self.set_connection_status("无法恢复微信窗口，请从任务栏还原后重试。")
-                return
-        self.wechat_hidden_with_app = False
-        if self.dock.active and self.dock.target != target:
-            self.undock()
-        if not self.dock.active:
-            if not self.dock.attach(target, int(self.winId()), int(self.preview.winId())):
-                self.clearMask()
-                return
-        elif not self.dock.align():
-            self.undock()
+    def _window_source(self):
+        """SourceKey of the connected window; None when the handle is unverified."""
+        item = self.window_item
+        if not item:
+            return None
+        target = item.get("hwnd")
+        if not isinstance(target, WindowTarget):
+            return None
+        try:
+            return SourceKey.from_window_target(target)
+        except (TypeError, ValueError):
+            return None
+
+    def _host_hwnd(self):
+        try:
+            return int(self.winId())
+        except (RuntimeError, TypeError, ValueError):
+            return 0
+
+    def _aperture_hwnd(self):
+        try:
+            return int(self.preview.winId())
+        except (RuntimeError, TypeError, ValueError):
+            return 0
+
+    def _aperture_rect(self):
+        """Physical-pixel rectangle of the central preview (the docking aperture).
+
+        Prefer the native Win32 rectangle (exact under Per-Monitor V2, as in 0.2);
+        fall back to the Qt logical geometry converted with the host window DPI.
+        """
+        manager = self.window_manager
+        api = getattr(manager, "api", None) if manager is not None else None
+        if api is not None:
+            try:
+                return tuple(api.rect(int(self.preview.winId())))
+            except (AttributeError, OSError, TypeError, ValueError):
+                pass
+        origin = self.preview.mapToGlobal(QPoint(0, 0))
+        size = self.preview.size()
+        dpi_value = dpi(self._host_hwnd()) or 96
+        return rect_to_physical((origin.x(), origin.y(),
+                                 origin.x() + size.width(),
+                                 origin.y() + size.height()), dpi_value)
+
+    @property
+    def _overlay_safe(self):
+        manager = getattr(self, "window_manager", None)
+        return bool(manager is not None and manager.overlay_safe)
+
+    def _open_aperture(self):
+        if (self.page_stack.currentWidget() is not self.chat_page
+                or not self.isVisible() or self.isMinimized()):
+            self._close_aperture()
             return
         origin = self.preview.mapTo(self, QPoint(0, 0))
         hole = QRect(origin, self.preview.size())
         self.setMask(QRegion(self.rect()).subtracted(QRegion(hole)))
+        self._aperture_open = True
+
+    def _close_aperture(self):
+        self._aperture_open = False
+        self.clearMask()
+
+    def _set_dock_message(self, text):
+        """Avoid rewriting the connection label every docking timer tick."""
+        if getattr(self, "_dock_message", None) == text:
+            return
+        self._dock_message = text
+        if text:
+            self.set_connection_status(text)
+
+    def _apply_dock_status(self, status):
+        """Open the transparent aperture only when the group order is verified."""
+        if status is None:
+            self._close_aperture()
+            return
+        if status.ok and status.state == "attached" and status.overlay_safe:
+            self._open_aperture()
+            self._set_dock_message("微信已停靠 · 中央微信原生可交互")
+            return
+        self._close_aperture()
+        if status.state == "popup":
+            self._set_dock_message("微信弹窗覆盖聊天区域：中央切换为只读画面，请先关闭弹窗。")
+        elif status.reason == "identity":
+            self._set_dock_message("微信窗口身份已变化：中央为只读画面，请重新连接。")
+        elif status.reason in ("host_invalid", "aperture_invalid"):
+            self._set_dock_message("窗口句柄尚未就绪：中央为只读画面，暂不打开透明开口。")
+        else:
+            self._set_dock_message("窗口层级未确认：中央切换为只读画面，避免露出其他桌面内容。")
+
+    def _apply_capture_health(self, health):
+        """Capture heartbeat / popup / minimized / stale gate the read-only fallback."""
+        if health is None:
+            self._close_aperture()
+            return
+        if health.overlay_safe and health.state == "live":
+            self._open_aperture()
+            self._set_dock_message("微信已停靠 · 中央微信原生可交互")
+            return
+        self._close_aperture()
+        if health.state == "popup":
+            self._set_dock_message("微信弹窗覆盖聊天区域：中央切换为只读画面，请先关闭弹窗。")
+        elif health.state == "minimized":
+            self._set_dock_message("微信已最小化：中央为只读画面，返回聊天页后自动还原。")
+        elif health.state == "stale":
+            self._set_dock_message("采集画面已过期：中央切换为只读画面，等待新画面。")
+        elif health.state in ("error", "disconnected"):
+            self._set_dock_message("微信窗口状态异常：中央为只读画面，请重新连接。")
+        elif health.state == "login":
+            self._set_dock_message("微信处于登录窗口：中央为只读画面。")
+        else:
+            self._set_dock_message("窗口层级未确认：中央切换为只读画面，避免露出其他桌面内容。")
+
+    def undock(self):
+        """Detach the managed window (restores geometry/minimized state) + close hole."""
+        manager = getattr(self, "window_manager", None)
+        if manager is not None:
+            manager.detach()
+        self._close_aperture()
+
+    def sync_dock(self):
+        manager = getattr(self, "window_manager", None)
+        if manager is None:
+            self._close_aperture()
+            return
+        source = self._window_source()
+        if source is None:
+            if manager.attached:
+                manager.detach()
+            self._close_aperture()
+            return
+        chat_visible = (self.isVisible() and not self.isMinimized()
+                        and self.page_stack.currentWidget() is self.chat_page)
+        if not chat_visible:
+            page = self.page_stack.currentWidget()
+            if self.isMinimized() or not self.isVisible():
+                mode = "minimized"
+            elif page is self.history_page:
+                mode = "history"
+            elif page is self.settings_page:
+                mode = "settings"
+            else:
+                mode = "minimized"
+            manager.set_view(mode)
+            self._close_aperture()
+            return
+        manager.set_view("chat")
+        if not manager.attached:
+            host_hwnd, aperture_hwnd = self._host_hwnd(), self._aperture_hwnd()
+            if not host_hwnd or not aperture_hwnd:
+                self._close_aperture()
+                self._set_dock_message("窗口句柄尚未就绪：中央为只读画面，暂不打开透明开口。")
+                return
+            status = manager.attach(source, self._aperture_rect(),
+                                    host_hwnd=host_hwnd,
+                                    aperture_hwnd=aperture_hwnd)
+        else:
+            status = manager.sync()
+        self._apply_dock_status(status)
+        self._apply_capture_health(manager.capture_health(source))
+
+    def on_activated(self):
+        """Second-instance activation: repair the docked group's Z order (no focus steal)."""
+        manager = getattr(self, "window_manager", None)
+        if manager is None:
+            return False
+        repaired = bool(manager.on_activated())
+        QTimer.singleShot(0, self.sync_dock)
+        return repaired
 
     def show_chat(self):
         if hasattr(self, "page_stack"):
@@ -765,11 +919,17 @@ class MainWindow(QMainWindow):
             self.nav_chat.setChecked(True)
             self.nav_history.setChecked(False)
             self.nav_settings.setChecked(False)
+            manager = getattr(self, "window_manager", None)
+            if manager is not None:
+                manager.set_view("chat")
             self.ai_toggle.show()
             QTimer.singleShot(0, self.sync_dock)
 
     def show_history(self):
-        self.undock()
+        manager = getattr(self, "window_manager", None)
+        if manager is not None:
+            manager.set_view("history")
+        self._close_aperture()
         if not self.ai_panel.isHidden():
             self.toggle_ai_panel()
         self.page_stack.setCurrentWidget(self.history_page)
@@ -783,7 +943,10 @@ class MainWindow(QMainWindow):
             self.history_page.status.setText("无法打开本地记忆库，请检查用户目录权限。")
 
     def show_settings(self):
-        self.undock()
+        manager = getattr(self, "window_manager", None)
+        if manager is not None:
+            manager.set_view("settings")
+        self._close_aperture()
         if not self.ai_panel.isHidden():
             self.toggle_ai_panel()
         self.page_stack.setCurrentWidget(self.settings_page)
@@ -942,10 +1105,9 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(250, self.sync_dock)
 
     def stop_capture(self):
+        # Detach restores the pre-takeover geometry/minimized state and clears
+        # this assistant's signed recovery record; never touches unmanaged windows.
         self.undock()
-        if self.wechat_hidden_with_app and self.window_item:
-            self.dock.set_minimized(self.window_item["hwnd"], False)
-        self.wechat_hidden_with_app = False
         if self.stop_event:
             self.stop_event.set()
         if self.child:
@@ -972,12 +1134,14 @@ class MainWindow(QMainWindow):
         if getattr(self, "preview_image", None) is not None:
             self.preview.setPixmap(self.preview_image.scaled(self.preview.size(),
                 Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
-        if hasattr(self, "dock") and self.dock.active:
+        manager = getattr(self, "window_manager", None)
+        if manager is not None and manager.attached:
             QTimer.singleShot(0, self.sync_dock)
 
     def moveEvent(self, event):
         super().moveEvent(event)
-        if hasattr(self, "dock") and self.dock.active:
+        manager = getattr(self, "window_manager", None)
+        if manager is not None and manager.attached:
             QTimer.singleShot(0, self.sync_dock)
 
     def tick(self):
@@ -1000,11 +1164,22 @@ class MainWindow(QMainWindow):
                     continue
                 self.last_packet_at = time.monotonic()
                 kind = packet["kind"]
+                # Feed capture freshness into WindowManager: every packet proves the
+                # capture process is alive, so a static picture is not "stale".
+                manager = getattr(self, "window_manager", None)
+                source = self._window_source()
+                if manager is not None and source is not None:
+                    manager.record_heartbeat(source)
                 if kind == "frame":
                     self.show_preview(packet["image"])
+                    if manager is not None and source is not None:
+                        manager.record_frame(source)
                 elif kind == "snapshot":
                     if not self.frame_freshness.accepts(packet.get("frame_seq", 0)):
                         continue
+                    if manager is not None and source is not None:
+                        manager.record_frame(source)
+                        manager.record_ocr(source)
                     if self.remote_reading:
                         # Local OCR stays the change detector and failure fallback;
                         # once a remote read confirmed the current text, OCR must not
@@ -1014,8 +1189,11 @@ class MainWindow(QMainWindow):
                         if self.reading_snapshot_ready():
                             continue
                     changed = self.state.update(packet["title"], packet["messages"])
+                    if changed and manager is not None and source is not None:
+                        manager.record_frame(source, changed=True)
                     self.chat_title.setText(packet["title"])
-                    self.set_connection_status("正在本地识别 · 微信已停靠" if self.dock.active else
+                    self.set_connection_status("正在本地识别 · 微信已停靠"
+                                               if self._overlay_safe else
                                                "正在本地识别 · 中央实时画面")
                     if changed:
                         self.set_editor(self.state.text)
@@ -1193,7 +1371,8 @@ class MainWindow(QMainWindow):
                 self.reading_ok_token = self.state.token
                 self.changed_at = time.monotonic()
                 self.clear_results()
-                self.set_connection_status("远程读取完成 · 微信已停靠" if self.dock.active
+                self.set_connection_status("远程读取完成 · 微信已停靠"
+                                           if self._overlay_safe
                                            else "远程读取完成 · 中央实时画面")
                 if changed:
                     self.analysis_status.setText("已读取新对话，等待分析")

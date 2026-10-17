@@ -81,9 +81,14 @@ class NativeWindows:
     @staticmethod
     def placement_flags(after):
         """Flags used for every placement: never activate, never show, keep Z order
-        unless an explicit insert-after window was requested."""
+        unless an explicit (valid) insert-after window was requested.
+
+        ``after`` may be ``None`` or a falsy handle (0); both mean "keep the
+        current Z order". 0 must never be forwarded as HWND_TOP: that would
+        silently raise the target above the assistant/other windows (R-07).
+        """
         flags = SWP_NOACTIVATE | SWP_NOOWNERZORDER
-        if after is None:
+        if not after:
             flags |= SWP_NOZORDER
         return flags
 
@@ -118,9 +123,13 @@ class NativeWindows:
 
     def set_pos(self, hwnd, after, rect):
         left, top, right, bottom = rect
+        # Normalize falsy insert-after handles (0 = HWND_TOP) to "keep Z order"
+        # before they reach SetWindowPos (R-07). The flags then include
+        # SWP_NOZORDER, so no caller can accidentally raise the target.
+        insert_after = int(after) if after else None
         return bool(self.user32.SetWindowPos(
-            int(hwnd), int(after or 0), left, top, right - left, bottom - top,
-            self.placement_flags(after)))
+            int(hwnd), insert_after, left, top, right - left, bottom - top,
+            self.placement_flags(insert_after)))
 
     def foreground_window(self):
         return int(self.user32.GetForegroundWindow() or 0)

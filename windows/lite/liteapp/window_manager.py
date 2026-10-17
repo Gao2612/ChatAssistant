@@ -278,15 +278,30 @@ class WindowManager:
             return self._set(DockStatus(state="refused", source=source,
                                         hwnd=int(source.hwnd), rect=target_rect,
                                         reason="identity"))
+        # R-07: never forward a fake/zero/invalid host or aperture handle to
+        # SetWindowPos. 0 would be HWND_TOP; a closed host handle would fail the
+        # group's Z-order contract. Fail closed before moving anything.
+        if host_hwnd is not None:
+            host_hwnd = self._window_handle(host_hwnd)
+            if host_hwnd is None:
+                return self._set(DockStatus(state="refused", source=source,
+                                            hwnd=int(source.hwnd), rect=target_rect,
+                                            read_only=True, reason="host_invalid"))
+        if aperture_hwnd is not None:
+            aperture_hwnd = self._window_handle(aperture_hwnd)
+            if aperture_hwnd is None:
+                return self._set(DockStatus(state="refused", source=source,
+                                            hwnd=int(source.hwnd), rect=target_rect,
+                                            read_only=True, reason="aperture_invalid"))
 
         if self._attachment is not None:
             current = self._attachment
             if current.source == source:
                 current.target_rect = target_rect
                 if host_hwnd is not None:
-                    current.host_hwnd = int(host_hwnd)
+                    current.host_hwnd = host_hwnd
                 if aperture_hwnd is not None:
-                    current.aperture_hwnd = int(aperture_hwnd)
+                    current.aperture_hwnd = aperture_hwnd
                 return self.sync(target_rect=target_rect, host_hwnd=host_hwnd, now=now)
             if _same_process(current.source, source):
                 # Login -> chat main window handover of the same trusted process.
@@ -340,8 +355,8 @@ class WindowManager:
 
         zorder_ok = self._verify_zorder(hwnd, host_hwnd, target_rect)
         attachment = _Attachment(
-            source=source, host_hwnd=int(host_hwnd) if host_hwnd is not None else None,
-            aperture_hwnd=int(aperture_hwnd) if aperture_hwnd is not None else None,
+            source=source, host_hwnd=host_hwnd if host_hwnd is not None else None,
+            aperture_hwnd=aperture_hwnd if aperture_hwnd is not None else None,
             target_rect=target_rect, original_rect=original_rect,
             original_minimized=original_minimized, zorder_ok=zorder_ok,
             attached_at=self._now(now))
@@ -361,7 +376,16 @@ class WindowManager:
             attachment.target_rect = _require_rect(
                 tuple(int(value) for value in target_rect), "target_rect")
         if host_hwnd is not None:
-            attachment.host_hwnd = int(host_hwnd)
+            host_hwnd = self._window_handle(host_hwnd)
+            if host_hwnd is None:
+                # R-07: an invalid host must never reach SetWindowPos: 0 would be
+                # HWND_TOP (raise above other apps) and a dead handle is useless.
+                return self._set(DockStatus(
+                    state="error", ok=False, source=attachment.source,
+                    hwnd=int(attachment.source.hwnd),
+                    rect=attachment.target_rect, read_only=True,
+                    reason="host_invalid"))
+            attachment.host_hwnd = host_hwnd
         hwnd = int(attachment.source.hwnd)
         if not self._validate(attachment.source) or not self.api.is_window(hwnd):
             source = attachment.source
@@ -402,11 +426,14 @@ class WindowManager:
                 reason="minimized"))
 
         foreground = int(self._foreground() or 0)
+        # R-07: a closed/zero host handle must never be forwarded to
+        # SetWindowPos. Fall back to "keep Z order" and mark the overlay unsafe.
+        insert_after = self._window_handle(attachment.host_hwnd)
         actual = self._rect(hwnd)
         if foreground == hwnd and actual != attachment.target_rect:
             # The user is moving/using the native window; pause correction.
-            attachment.zorder_ok = self._zorder(hwnd, attachment.host_hwnd) \
-                if attachment.host_hwnd else False
+            attachment.zorder_ok = self._zorder(hwnd, insert_after) \
+                if insert_after else False
             return self._set(DockStatus(
                 state="attached", ok=True, source=attachment.source, hwnd=hwnd,
                 rect=actual, original_rect=attachment.original_rect,
@@ -416,7 +443,7 @@ class WindowManager:
                 read_only=not self._overlay_safe(attachment), reason="user_dragging"))
 
         if actual != attachment.target_rect:
-            if not self.api.set_pos(hwnd, attachment.host_hwnd, attachment.target_rect):
+            if not self.api.set_pos(hwnd, insert_after, attachment.target_rect):
                 return self._set(DockStatus(state="error", source=attachment.source,
                                             hwnd=hwnd, rect=actual,
                                             reason="move_failed"))
@@ -473,6 +500,7 @@ class WindowManager:
             except OSError:
                 pass
         self._forget_recovery(attachment.source)
+        self._samples.pop(attachment.source, None)
         self._attachment = None
         self._status = DockStatus(state="detached", ok=True)
 
@@ -504,9 +532,12 @@ class WindowManager:
             if not self.api.set_minimized(hwnd, False):
                 return False
             attachment.app_minimized = False
+        # R-07: validate the host before any placement; a dead/zero handle would
+        # otherwise reach SetWindowPos as HWND_TOP.
+        insert_after = self._window_handle(attachment.host_hwnd)
         actual = self._rect(hwnd)
         if actual != attachment.target_rect:
-            if not self.api.set_pos(hwnd, attachment.host_hwnd, attachment.target_rect):
+            if not self.api.set_pos(hwnd, insert_after, attachment.target_rect):
                 return False
         attachment.zorder_ok = self._zorder_or_repair(attachment, hwnd,
                                                       int(self._foreground() or 0),
@@ -609,6 +640,23 @@ class WindowManager:
     def _rect(self, hwnd):
         return tuple(self.api.rect(int(hwnd)))
 
+    def _window_handle(self, value):
+        """Normalize/validate an HWND argument (R-07).
+
+        Returns ``None`` for ``None``, 0, non-integers and handles that are no
+        longer a window. Callers must fail closed instead of passing 0 to
+        ``SetWindowPos`` (0 means HWND_TOP, i.e. raise-to-front).
+        """
+        if value is None:
+            return None
+        try:
+            handle = int(value)
+        except (TypeError, ValueError):
+            return None
+        if not handle or not self.api.is_window(handle):
+            return None
+        return handle
+
     def _restored_rect(self, hwnd):
         probe = getattr(self.api, "restored_rect", None)
         if callable(probe):
@@ -616,17 +664,18 @@ class WindowManager:
         return self._rect(hwnd)
 
     def _verify_zorder(self, hwnd, host_hwnd, rect):
-        if host_hwnd is None:
+        host = self._window_handle(host_hwnd)
+        if host is None:
             return False
-        if self._zorder(hwnd, int(host_hwnd)):
+        if self._zorder(hwnd, host):
             return True
         # exactly one repair attempt at attach time, never a loop
-        if not self.api.set_pos(int(hwnd), int(host_hwnd), rect):
+        if not self.api.set_pos(int(hwnd), host, rect):
             return False
-        return bool(self._zorder(hwnd, int(host_hwnd)))
+        return bool(self._zorder(hwnd, host))
 
     def _zorder_or_repair(self, attachment, hwnd, foreground, force=False):
-        host = attachment.host_hwnd
+        host = self._window_handle(attachment.host_hwnd)
         if host is None:
             return False
         if self._zorder(hwnd, host):
@@ -671,5 +720,7 @@ class WindowManager:
     def _drop_attachment(self, forget=True):
         attachment = self._attachment
         self._attachment = None
-        if attachment is not None and forget:
-            self._forget_recovery(attachment.source)
+        if attachment is not None:
+            if forget:
+                self._forget_recovery(attachment.source)
+            self._samples.pop(attachment.source, None)

@@ -105,6 +105,13 @@ def install_activation_poll(guard, window, interval_ms=250):
             window.showNormal()
         window.raise_()
         window.activateWindow()
+        # T4-UI: the docked WeChat window must sit directly below the assistant
+        # window so the transparent central aperture shows WeChat, not another
+        # desktop window. Repairing the group order here never takes focus away
+        # from the user: it is a non-activating Z-order placement.
+        notify = getattr(window, "on_activated", None)
+        if callable(notify):
+            notify()
 
     timer.timeout.connect(poll)
     timer.start()
