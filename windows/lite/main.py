@@ -63,14 +63,38 @@ def install_activation_poll(guard, window, interval_ms=250):
     return timer
 
 
+def start_recovery_supervisor(data_dir):
+    """Start the crash-recovery guard child; ``None`` when it cannot start.
+
+    The guard only holds signed window-identity/geometry records (never chat
+    data) and restores the original rectangle if the main process dies without a
+    clean shutdown. A guard failure must not block the application: the user
+    simply keeps the manual restore path.
+    """
+    from liteapp.recovery_guard import RecoverySupervisor
+    supervisor = RecoverySupervisor(data_dir)
+    return supervisor if supervisor.start() else None
+
+
 def main():
     configure_frozen_dll_search()
-    guard, owned = claim_instance()
+    # Recovery guard child mode: no Qt, no instance lock, no user data reads
+    # beyond the signed geometry records it was started for.
+    if "--recovery-guard" in sys.argv[1:]:
+        from liteapp.recovery_guard import supervisor_main
+        return supervisor_main(sys.argv[1:])
+    data_dir = resolve_data_dir()
+    guard, owned = claim_instance(data_dir)
     if not owned:
         print("ChatAssistant Lite 已在运行，已请求激活已有窗口。", file=sys.stderr)
         guard.release()
         return 0
+    supervisor = None
     try:
+        supervisor = start_recovery_supervisor(data_dir)
+        if supervisor is None:
+            print("窗口恢复守护进程启动失败；主程序异常退出后将无法自动恢复微信窗口位置。",
+                  file=sys.stderr)
         from PySide6.QtWidgets import QApplication
         from PySide6.QtCore import QTimer, QEvent
         from liteapp.ui import MainWindow
@@ -94,6 +118,8 @@ def main():
         app.processEvents()
         return result
     finally:
+        if supervisor is not None:
+            supervisor.stop_clean()
         guard.release()
 
 

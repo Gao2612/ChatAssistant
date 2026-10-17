@@ -35,7 +35,7 @@ def significant_visual_change(previous, current, threshold=0.002):
 
 def run(out, stop, hwnd, session, frame_clock, reading_backend="ocr"):
     import ctypes
-    from .discovery import WindowTarget, valid, minimized, dpi
+    from .discovery import WindowTarget, valid, minimized, dpi, popup_covering
     latest = [None]
     latest_seq = [0]
     last_clock_image = [None]
@@ -139,7 +139,19 @@ def run(out, stop, hwnd, session, frame_clock, reading_backend="ocr"):
                 identity_changed = True
                 break
             if minimized(hwnd):
-                emit("unavailable", message="微信已最小化，请手动还原微信后继续。")
+                emit("unavailable", state="minimized",
+                     message="微信已最小化，请手动还原微信后继续。")
+                last_frame = None
+                with lock:
+                    latest[0] = None
+                continue
+            # A native popup (image preview, file dialog, menu…) keeps its own
+            # native top-level relationship; the snapshot is marked unavailable
+            # instead of analysing popup text or fighting its position.
+            popup_hwnd = popup_covering(hwnd_value)
+            if popup_hwnd:
+                emit("unavailable", state="popup", popup_hwnd=int(popup_hwnd),
+                     message="微信弹窗覆盖聊天区域，已暂停分析，请先关闭弹窗。")
                 last_frame = None
                 with lock:
                     latest[0] = None
