@@ -1,0 +1,50 @@
+# Windows Lite 整改执行进度
+
+计划：`WINDOWS_LITE_COMPLETION_PLAN_2026-10-17.md`。设计：`WINDOWS_LITE_COMPLETION_DESIGN_2026-10-17.md`。分支 `feat/windows-lite`。用户于 2026-10-17 授权按方案整改，补充要求文字读取和对话分析分别选择本地 OCR、多模态模型、ChatGPT/API、Codex 或已运行的本地模型服务。
+
+**2026-10-18 更新**：读取/分析双后端已落码，86 项单测通过；真实 Codex 免费 RPC 验证通过。详见 [`_reports/backend_read_analysis_split_report.md`](../../_reports/backend_read_analysis_split_report.md) 与 [`WINDOWS_LITE_ACCEPTANCE_CHECKLIST_2026-10-18.md`](WINDOWS_LITE_ACCEPTANCE_CHECKLIST_2026-10-18.md)。
+
+## 恢复入口
+
+每小时自动任务已创建（id：`automation`），在当前聊天继续。若额度限制导致中断，下一次先读本文件和实际源码，再从未完成项目继续，不重新设计或重复已完成测试。只有实际验证过的项目才标记完成。
+
+## 执行决定
+
+- Ruling：在当前 feature 分支原目录继续。现有 0.2 Windows 工程尚未提交；创建新 worktree 不会带入这些文件，且用户已授权在本项目继续整改。保留全部既有修改，不 reset、不清理，不自动 commit/push。
+- Ruling：按用户“额度快没了”采用单智能体顺序实现；先处理自动链路与独立后端，再逐步完成 T1–T12。此前规划子智能体均遭遇用量限制。
+- Ruling：读取和分析分为两套配置，允许选择不同服务/模型。远程视觉读取会发送所选微信画面；本地模型通过本机兼容服务接入，不自动下载权重。
+- Ruling：Codex 后端使用官方 app-server，支持图像输入、模型和账号状态 RPC；不读取桌面私有凭据。选择模型不等于复制当前聊天模型，实际可用能力需请求验证。
+- Ruling：先实现用户实际阻塞的回归修复，再完成基础契约、账号服务、模型队列和历史全量分析。计划的依赖接口仍保持。
+
+## 任务状态
+
+| 项目 | 状态 | 证据/下一步 |
+| --- | --- | --- |
+| 每小时继续 | 已创建 | heartbeat，当前聊天，每小时尝试；额度限制时保存进度 |
+| OCR 后自动分析 | 回归修复已落码，单测通过 | `state.py` 修订语义 + `ui.py` 重检恢复；`test_auto_pipeline.py` 4 项。0.2 安装包不包含该修复，需安装 0.3 包 |
+| 读取/分析独立配置 | ✅ 2026-10-18 已落码，单测通过 | `settings.py`（读取键 + DPAPI `protected_reading_key`）、`backends.py`、`reading.py`、`codex_backend.py`、`worker.py`、`ui.py`；86 项测试通过 |
+| 读取后端：本地 OCR | 默认保留，完全离线 | `worker.py`；原有验证 |
+| 读取后端：多模态模型 | ✅ 已落码（OpenAI 兼容视觉接口） | `reading.vision_read`；仅假 HTTP 服务端测试，真实接口未验证 |
+| 读取后端：Codex | ✅ 已落码；真实免费 RPC 验证 | `codex_backend.read_image`；账号 Plus、7 个模型均 text,image；真实图像回合未执行（额度） |
+| 分析后端：ChatGPT 套餐 | 保留原有 | `subscription.py`；10-17 真机验证 |
+| 分析后端：兼容 API | 保留原有 | `analysis.py`；无真实第三方 API 调用证据 |
+| 分析后端：本地模型服务 | ✅ 已落码（默认 `http://127.0.0.1:11434/v1`，可无 Key） | 本机无本地模型服务，未实测；假服务端测试 |
+| 分析后端：Codex | ✅ 已落码；真实免费 RPC 验证 | `codex_backend.analyze`；真实文本回合未执行（额度） |
+| 中央遮挡/当前联系人导入 | 未修复 | 根因与目标已写入设计和 T4/T8/T9 |
+| T1–T12 | 待执行 | 逐任务更新，不把旧单元通过计为新任务完成 |
+| 0.3 安装包 | 便携版已重建并通过冒烟；安装器编译结果见报告 | `build.ps1` / `installer/ChatAssistantLite.iss`；E:\ 已装 0.2，升级需用户安装 |
+
+## 最新验证
+
+- 2026-10-18：`python -m unittest discover -s tests -q` → **86 项通过**（整改前 53 项中 51 通过、2 个失败为上一轮先写的读取/分析分开配置测试）。
+- 2026-10-18：真实 Codex app-server 免费 RPC（initialize / account/read / model/list）通过：账号 `chatgpt` / `plus`，7 个模型均支持 `text,image`，关闭进程干净退出；未发送聊天内容、未消耗模型额度。
+- 2026-10-18：源码 `QT_QPA_PLATFORM=offscreen python main.py --smoke` 退出码 0；PyInstaller 重建便携版并通过 `--smoke`。
+- 2026-10-17：基线 46 项通过；新增自动链路回归先失败 3 项，修复后 51 项通过。
+- 2026-10-17：真实微信停靠/采集/OCR 与 ChatGPT 授权证据见 `WINDOWS_LITE_VERIFICATION_2026-10-17.md`，本轮未重复实机测试。
+
+## 续跑注意
+
+- 真实微信扫码、登录和最终发送由用户完成；合成数据用于依赖调试。外部 model 调用只在明确选择的后端执行。
+- Codex 真实模型回合会消耗用户额度：先点设置里“检测 Codex 账号与模型”做免费验证；不要用真实对话测试额度。
+- 读取/分析双后端的安全边界：Codex 只读沙箱 + 审批 `never` + 拒绝服务端工具请求；远程读取只发送当前画面；失败回退本地 OCR；OCR 在远程确认后不覆盖远程转写。
+- 留意代理环境影响本地 HTTP 回环测试，不用失败的回环连接推断远端模型不可用。

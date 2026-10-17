@@ -1,0 +1,13 @@
+__pycache__/
+.pytest_cache/
+build/
+build-*/
+dist/
+dist-*/
+probe-*/
+*.spec
+*.log
+*.exe
+*.zip
+*-crash-report.xml
+test-output/

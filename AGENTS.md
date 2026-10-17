@@ -1,15 +1,20 @@
 # Agent 项目入口
 
 本仓库当前主体为 Android 聊天助手；新增 Windows 产品方向的权威需求入口如下：
+- [Windows 完整版设计（2026-10-17）](docs/windows/WINDOWS_LITE_COMPLETION_DESIGN_2026-10-17.md)
+- [Windows 完整版分任务实施计划](docs/windows/WINDOWS_LITE_COMPLETION_PLAN_2026-10-17.md)
 - [Windows 微信详细方案](docs/windows/WINDOWS_WECHAT_PRODUCT_PLAN.md)
 - [Windows Agent 交接](docs/windows/AGENT_HANDOFF.md)
+- [Windows Lite 0.2 本机验证](docs/windows/WINDOWS_LITE_VERIFICATION_2026-10-17.md)
+- [读取/分析双后端验收清单（2026-10-18）](docs/windows/WINDOWS_LITE_ACCEPTANCE_CHECKLIST_2026-10-18.md)
+- [读取/分析双后端整改报告（2026-10-18，本机 `_reports/`）](_reports/backend_read_analysis_split_report.md)
 - [微信嵌入实机结果](docs/windows/WECHAT_EMBED_TEST_RESULTS_2026-10-14.md)
 - [临时探针源码](windows/probes/wechat-embed/README.md)
 
-任何涉及 Windows、微信嵌入、多开、实时回复、ExportWeChat HTML、客户画像、关系趋势、聊天统计、exe 安装包的任务，应先阅读上述两份文档。
+任何涉及 Windows、微信嵌入、多开、实时回复、ExportWeChat HTML、客户画像、关系趋势、聊天统计、exe 安装包、读取/分析后端选择的任务，应先阅读完整版设计、分任务实施计划、0.2 本机验证与 2026-10-18 验收清单。设计中的待实施能力不得写成已交付。
 
 ## 工作边界
-- 正式 Windows 产品未实现；临时探针已完成部分验证并发现单击/滚动故障。不得把父级关系或模拟自检成功写成完整兼容。
+- `windows/lite/` 已有 Windows 0.2 本地实现和测试安装包；旧临时 `SetParent` 探针发现单击/滚动故障。新版顶层窗口停靠已验证鼠标命中、画面和 OCR，但单击/滚动、输入法、扫码及弹窗尚未逐项验收，不得写成完整兼容。
 - Windows 工程建议独立放在 windows/，保留 Android app/。
 - 根 CLAUDE.md 中 Android 平台规则适用于原 Android 工程，不应误作 Windows 固定路径或依赖要求。
 - 用户于 2026-10-14 明确授权编写并上传本次方案；这次文档提交符合用户指令，覆盖 CLAUDE.md 中通用的禁止提交/推送规则。

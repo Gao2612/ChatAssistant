@@ -2,9 +2,11 @@
 
 ## Windows 产品方案与 Agent 入口
 
-Windows 微信内嵌、多账号、实时回复建议，以及 ExportWeChat HTML / 本地聊天记录的历史分析任务方案，见 [详细方案](docs/windows/WINDOWS_WECHAT_PRODUCT_PLAN.md)。其他智能体请先读 [AGENTS.md](AGENTS.md) 和 [交接说明](docs/windows/AGENT_HANDOFF.md)。该方向目前处于设计阶段，尚未完成 Windows 原型验证或实现。
+Windows 微信内嵌、多账号、实时回复建议，以及 ExportWeChat HTML / 本地聊天记录的历史分析任务方案，见 [详细方案](docs/windows/WINDOWS_WECHAT_PRODUCT_PLAN.md)。其他智能体请先读 [AGENTS.md](AGENTS.md) 和 [交接说明](docs/windows/AGENT_HANDOFF.md)。
 
-已补充 [微信嵌入测试结果](docs/windows/WECHAT_EMBED_TEST_RESULTS_2026-10-14.md) 和 [测试原型源码](windows/probes/wechat-embed/README.md)。目前只完成部分验证，已发现单击会话和滚动异常，不能视为可用的 Windows 产品。
+Windows 方向已有独立实现 `windows/lite/`（ChatAssistant Lite）：官方微信原生窗口中央停靠 + 本地 OCR/多模态读取 + 右侧 AI 建议 + HTML/PDF 历史导入。2026-10-18 已把「文字读取」和「对话分析」拆成两套可分别选择的后端（读取：本地 OCR / 多模态模型 / Codex；分析：ChatGPT 套餐 / 兼容 API / 本地模型服务 / Codex），并通过 86 项单测与真实 Codex 账号/模型目录 RPC 验证；便携版和 0.3 安装器已重建。真实微信的单击/滚轮/输入法/扫码/弹窗与远程读取质量仍需逐项验收，详见 [验收清单](docs/windows/WINDOWS_LITE_ACCEPTANCE_CHECKLIST_2026-10-18.md) 和 [0.2 验证记录](docs/windows/WINDOWS_LITE_VERIFICATION_2026-10-17.md)。
+
+已补充 [微信嵌入测试结果](docs/windows/WECHAT_EMBED_TEST_RESULTS_2026-10-14.md) 和 [测试原型源码](windows/probes/wechat-embed/README.md)。旧 `SetParent` 探针存在单击/滚动异常，不代表新的顶层停靠方案通过了全部交互验收。
 
 **装在手机上的「对话副驾」：你在任何聊天 App 里聊天，它在旁边读懂对方、告诉你该怎么回，一键填进输入框，发不发由你。**
 

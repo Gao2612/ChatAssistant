@@ -1,0 +1,6 @@
+PySide6-Essentials>=6.8,<7
+rapidocr-onnxruntime>=1.4,<2
+windows-capture>=2,<3
+pillow>=10
+PyJWT[crypto]>=2.10,<3
+pypdf>=5,<7
