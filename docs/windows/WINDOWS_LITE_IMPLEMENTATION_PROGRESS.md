@@ -48,6 +48,7 @@
 | S-DOCK 镜像预览/停靠开关 | 🟡 用户新要求，Lead 实现中 | 默认镜像只读预览，不改原生微信大小/位置；停靠改为默认关闭的显式开关；应用 resize 只缩放预览 |
 | S-自动查找微信对话 | ✅ 真实验收通过（仅切换） | 恢复托盘窗口→OCR 搜索“田子夜”→点击结果+Enter→顶部 OCR 命中；未发送消息 |
 | P1 测试退出崩溃 | ✅ commit `4d8642d` | tests/__init__ runner 后清理顶层 QWidget；28/60→0/60；全量 622 项 `discover -s tests -t .` exit 0 |
+| S-TRAY-ACT 托盘隐藏下自动找对话/发送 | 🟡 找对话实测通过；发送方案同构待授权实测 | 临时恢复窗口→OCR 找对话→恢复托盘；发送需标题校验+焦点探针+双条件验证；UIA 实测不可用 |
 | D-UI 按设计 Skills 重构 UI | ⏳ 用户新增，排在功能与验收之后 | frontend-design / ui-ux-pro-max / impeccable / web-design-guidelines / theme-factory / canvas-design / web-artifacts-builder / brand-guidelines / react-best-practices / webapp-testing；PySide6 桌面 UI 按设计原则重构，React/Next 条目仅取可迁移原则 |
 | 设置下拉禁滚轮 | ✅ commit 29678b1 | 所有设置下拉 NoWheelComboBox，滚轮不改选择，弹窗最多 20 行 |
 
