@@ -805,7 +805,7 @@ class MainWindow(QMainWindow):
     def __init__(self, config=None, scanning=True, window_manager=None, account_store=None,
                  inference_queue=None):
         super().__init__()
-        self.setWindowTitle("微信实时助手 · 便捷版 0.5.6")
+        self.setWindowTitle("微信实时助手 · 便捷版 0.5.7")
         self.resize(1000, 520)
         self.setMinimumSize(900, 500)
         self.setStyleSheet(STYLE)
@@ -2127,6 +2127,11 @@ class MainWindow(QMainWindow):
         if self.wechat_busy:
             return
         self.wechat_busy = True
+        # Two WGC sessions on the same window can race and starve the OCR frame;
+        # pause our read-only capture while the action owns the window, then
+        # reconnect from wechat_action_done.
+        self._resume_item_after_action = self.window_item
+        self.stop_capture()
         self.set_notice(f"正在查找微信对话：{target}…")
 
         def work():
@@ -2170,6 +2175,10 @@ class MainWindow(QMainWindow):
         if answer != QMessageBox.StandardButton.Yes:
             return
         self.wechat_busy = True
+        # Pause our read-only WGC session while the action captures/OCRs the same
+        # window; wechat_action_done reconnects the capture worker afterwards.
+        self._resume_item_after_action = self.window_item
+        self.stop_capture()
         self.set_notice("正在发送建议到微信…")
 
         def work():
@@ -2235,24 +2244,38 @@ class MainWindow(QMainWindow):
 
     def wechat_action_done(self, action, result, error):
         self.wechat_busy = False
-        if error:
-            self.set_notice(error)
+        try:
+            if error:
+                self.set_notice(error)
+                return
+            if result is None:
+                self.set_notice("自动操作未返回结果。")
+                return
+            if action == "find":
+                if getattr(result, "ok", False):
+                    self.set_notice("已切换到目标对话；请核对内容后再点击“发送到微信”。")
+                else:
+                    self.set_notice(self._wechat_reason_text(result, "查找对话失败"))
+            elif action == "send":
+                if getattr(result, "sent", False) and getattr(result, "verified", False):
+                    self.set_notice("建议已发送并通过双条件验证（输入框清空 + 气泡出现）。")
+                elif getattr(result, "sent", False):
+                    self.set_notice("消息可能已发送，但自动验证失败，请到微信人工确认。")
+                else:
+                    self.set_notice(self._wechat_reason_text(result, "发送失败"))
+        finally:
+            self._resume_capture_after_action()
+
+    def _resume_capture_after_action(self):
+        """Reconnect the read-only capture worker after an auto action paused it."""
+        item = getattr(self, "_resume_item_after_action", None)
+        self._resume_item_after_action = None
+        if item is None:
             return
-        if result is None:
-            self.set_notice("自动操作未返回结果。")
-            return
-        if action == "find":
-            if getattr(result, "ok", False):
-                self.set_notice("已切换到目标对话；请核对内容后再点击“发送到微信”。")
-            else:
-                self.set_notice(self._wechat_reason_text(result, "查找对话失败"))
-        elif action == "send":
-            if getattr(result, "sent", False) and getattr(result, "verified", False):
-                self.set_notice("建议已发送并通过双条件验证（输入框清空 + 气泡出现）。")
-            elif getattr(result, "sent", False):
-                self.set_notice("消息可能已发送，但自动验证失败，请到微信人工确认。")
-            else:
-                self.set_notice(self._wechat_reason_text(result, "发送失败"))
+        try:
+            self.connect_item(item)
+        except (OSError, ValueError, TypeError):
+            self.set_connection_status("自动操作后未能恢复读取，请重新连接微信。")
 
     @staticmethod
     def _wechat_reason_text(result, fallback):
