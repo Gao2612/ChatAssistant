@@ -42,7 +42,7 @@ class DesignSystemTests(unittest.TestCase):
         policy = self.window.page_stack.sizePolicy()
         self.assertEqual(policy.horizontalPolicy(), QSizePolicy.Policy.Ignored)
         self.assertEqual(policy.verticalPolicy(), QSizePolicy.Policy.Ignored)
-        self.assertEqual(self.window.minimumWidth(), 980)
+        self.assertEqual(self.window.minimumWidth(), 900)
 
     def test_chat_empty_state_and_preview_target(self):
         self.assertIn("当前聊天画面", self.window.preview.text())

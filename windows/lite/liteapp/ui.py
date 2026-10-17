@@ -789,7 +789,7 @@ class MainWindow(QMainWindow):
     def __init__(self, config=None, scanning=True, window_manager=None, account_store=None,
                  inference_queue=None):
         super().__init__()
-        self.setWindowTitle("微信实时助手 · 便捷版 0.5.1")
+        self.setWindowTitle("微信实时助手 · 便捷版 0.5.2")
         self.resize(1000, 520)
         self.setMinimumSize(900, 500)
         self.setStyleSheet(STYLE)
@@ -899,7 +899,7 @@ class MainWindow(QMainWindow):
         rail_layout.addWidget(self.nav_history)
         rail_layout.addWidget(self.nav_settings)
         rail_layout.addStretch(1)
-        rail_layout.addWidget(label("实时助手", True), 0, Qt.AlignmentFlag.AlignHCenter)
+        rail_layout.addWidget(label("助手", True), 0, Qt.AlignmentFlag.AlignHCenter)
         layout.addWidget(rail)
 
         self.page_stack = QStackedWidget()
@@ -917,16 +917,13 @@ class MainWindow(QMainWindow):
         self.chat_title.setObjectName("title")
         chat_header.addWidget(self.chat_title, 1)
         self.connection_status = label("未连接微信", True)
-        self.connection_status.setSizePolicy(QSizePolicy.Policy.Ignored,
-                                             QSizePolicy.Policy.Preferred)
+        self.connection_status.setMinimumWidth(60)
         chat_header.addWidget(self.connection_status)
         self.effective_label = label("分析：未配置", True)
-        self.effective_label.setSizePolicy(QSizePolicy.Policy.Ignored,
-                                           QSizePolicy.Policy.Preferred)
+        self.effective_label.setMinimumWidth(120)
         chat_header.addWidget(self.effective_label)
         self.analysis_status = label("等待分析", True)
-        self.analysis_status.setSizePolicy(QSizePolicy.Policy.Ignored,
-                                           QSizePolicy.Policy.Preferred)
+        self.analysis_status.setMinimumWidth(50)
         chat_header.addWidget(self.analysis_status)
         chat_layout.addLayout(chat_header)
 

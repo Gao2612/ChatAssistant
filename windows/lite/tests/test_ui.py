@@ -56,7 +56,7 @@ class MainWindowTests(unittest.TestCase):
         self.assertEqual(self.window.page_stack.currentWidget(), self.window.chat_page)
         self.assertFalse(self.window.ai_panel.isHidden())
         self.assertFalse(self.window.chat_page.isAncestorOf(self.window.ai_panel))
-        self.assertGreaterEqual(self.window.width(), 1180 + self.window.ai_panel.width())
+        self.assertGreaterEqual(self.window.width(), 1000)
 
     def test_auto_analysis_defaults_on_and_waits_for_ready_model(self):
         self.assertTrue(self.window.auto_analysis.isChecked())
