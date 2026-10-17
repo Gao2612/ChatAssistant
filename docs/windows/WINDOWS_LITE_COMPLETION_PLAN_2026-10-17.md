@@ -57,10 +57,12 @@ CancellationToken.is_cancelled() -> bool
 InstanceGuard.acquire_or_activate(data_dir: Path) -> bool
 ```
 
-- [ ] 添加用例：相同 HWND/PID 但不同进程启动时刻是不同 SourceKey；任一 AnalysisKey 字段变化使旧结果不被接受；空账号/联系人 ID 被拒绝。
-- [ ] 用两个独立进程验证同一数据目录仅一个实例可写，第二个只发送激活消息；不同隔离测试目录可独立运行。
-- [ ] 实现不可变契约、版本比较、取消令牌和用户会话内单实例；保留现有状态测试行为。
-- [ ] 运行 `python -m unittest tests.test_contracts tests.test_single_instance tests.test_logic -v`，通过后发布契约给各工作线，不随意重命名接口。
+- [x] 添加用例：相同 HWND/PID 但不同进程启动时刻是不同 SourceKey；任一 AnalysisKey 字段变化使旧结果不被接受；空账号/联系人 ID 被拒绝。
+- [x] 用两个独立进程验证同一数据目录仅一个实例可写，第二个只发送激活消息；不同隔离测试目录可独立运行。
+- [x] 实现不可变契约、版本比较、取消令牌和用户会话内单实例；保留现有状态测试行为。
+- [x] 运行 `python -m unittest tests.test_contracts tests.test_single_instance tests.test_logic -v`，通过后发布契约给各工作线，不随意重命名接口。
+
+> 2026-10-18 完成（commit 见 PROGRESS）：`contracts.py`（ScopeKey/SourceKey/AnalysisKey/EvidenceRef/CancellationToken，frozen + fail-closed）、`single_instance.py`（`<data_dir>/instance.lock` 文件锁判唯一写者 + 回环 socket 随机令牌只投递激活，第二实例不读写用户数据）、`state.py` 作用域/摘要/分析键、`main.py` 启动抢锁与主线程激活轮询。定向 55 项、全套 137 项通过；双进程与 `main.py --smoke` 实测退出码 0。真实桌面前台激活留 T4/T12 实机验收。
 
 ## T2：统一 ChatGPT 账号注册与授权生命周期
 

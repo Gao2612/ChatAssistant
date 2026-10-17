@@ -25,7 +25,7 @@
 | 每小时继续 | 已创建 | heartbeat，当前聊天，每小时尝试；额度限制时保存进度 |
 | T0a 外部 API 配置（点1） | ✅ 2026-10-18 已落码，全套测试通过 | 厂商预设 + `analysis.list_models`（GET /models）+ 自动读取 + 当前生效后端/模型显示 + 卡片内保存；`test_analysis_models.py` 等 |
 | T0b ChatGPT 绑定记忆（点4） | ✅ 2026-10-18 已落码，全套测试通过 | 诊断：凭据与 refresh token 持久化/刷新正常，根因是模型记忆与提示；新增 `chatgpt_model` 等分后端字段、自动恢复、授权状态与「断开授权」；重启不再要求浏览器授权 |
-| T1 契约与单实例 | 🟡 队友 contracts 实现中 | 新文件 `liteapp/contracts.py`、`single_instance.py`；等待其报告与 Lead 复核后合并提交 |
+| T1 契约与单实例 | ✅ 2026-10-18 完成（commit 待记） | `liteapp/contracts.py`、`single_instance.py`、`state.py` 作用域/摘要、`main.py` 单实例；定向 55 项、全套 137 项通过；双进程激活与 smoke 实测 |
 | OCR 后自动分析 | 回归修复已落码，单测通过 | `state.py` 修订语义 + `ui.py` 重检恢复；`test_auto_pipeline.py` 4 项。0.2 安装包不包含该修复，需安装 0.3 包 |
 | 读取/分析独立配置 | ✅ 2026-10-18 已落码，单测通过 | `settings.py`（读取键 + DPAPI `protected_reading_key`）、`backends.py`、`reading.py`、`codex_backend.py`、`worker.py`、`ui.py`；86 项测试通过 |
 | 读取后端：本地 OCR | 默认保留，完全离线 | `worker.py`；原有验证 |

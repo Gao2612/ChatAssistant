@@ -13,7 +13,7 @@
 
 任何涉及 Windows、微信嵌入、多开、实时回复、ExportWeChat HTML、客户画像、关系趋势、聊天统计、exe 安装包、读取/分析后端选择的任务，应先阅读完整版设计、分任务实施计划、0.2 本机验证与 2026-10-18 验收清单。设计中的待实施能力不得写成已交付。
 
-2026-10-18 状态：用户点1（外部 API 厂商/地址/Key、读取模型列表、当前生效后端/模型显示、保存入口）与点4（ChatGPT 授权与模型记忆持久化、手动断开）已落码（T0a/T0b）；T1 契约与单实例由队友并行实现；T1–T12 仍按计划推进。真实进度以 [WINDOWS_LITE_IMPLEMENTATION_PROGRESS.md](docs/windows/WINDOWS_LITE_IMPLEMENTATION_PROGRESS.md) 为准。
+2026-10-18 状态：用户点1（外部 API 厂商/地址/Key、读取模型列表、当前生效后端/模型显示、保存入口）与点4（ChatGPT 授权与模型记忆持久化、手动断开）已落码（T0a/T0b）；T1 契约与单实例已完成（frozen 契约 + 文件锁单实例 + 回环激活）；T2–T12 按计划推进。真实进度以 [WINDOWS_LITE_IMPLEMENTATION_PROGRESS.md](docs/windows/WINDOWS_LITE_IMPLEMENTATION_PROGRESS.md) 为准。
 
 ## 工作边界
 - `windows/lite/` 已有 Windows 0.2 本地实现和测试安装包；旧临时 `SetParent` 探针发现单击/滚动故障。新版顶层窗口停靠已验证鼠标命中、画面和 OCR，但单击/滚动、输入法、扫码及弹窗尚未逐项验收，不得写成完整兼容。
