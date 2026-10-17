@@ -216,12 +216,14 @@ HistoryPage.open_evidence(ref: EvidenceRef) -> None
 ProfilePanel.set_report(report: HistoryReport) -> None
 ```
 
-- [ ] 用例：片段只有片段统计；无可靠发送人或时间时回复时延/主动比例显示不可计算；重叠来源明确提示；模型推断与事实显示不同标签。
-- [ ] 用例：报告引用点击跳到正确页/记录；已删除的证据不能打开旧缓存；任务暂停/继续/失败批次状态与实际进度一致。
-- [ ] 实现原文/档案/趋势/统计标签，档案显示需求、偏好、承诺、待办、冲突及时间线；长任务使用独立任务列表，不阻塞聊天。
-- [ ] 历史主界面改为“当前联系人 + 导入聊天记录”；账号选择移到设置，首次导入确认档案关联并创建 UUID。次要入口“选择其他联系人”保留独立离线导入；不再要求主流程先填写账号或手动新建联系人。
-- [ ] 运行 `python -m unittest tests.test_profile_ui tests.test_history_statistics tests.test_history_ui -v`，在 100%/125%/150% DPI 检查长中文和键盘导航。
+- [x] 用例：片段只有片段统计；无可靠发送人或时间时回复时延/主动比例显示不可计算；重叠来源明确提示；模型推断与事实显示不同标签。
+- [x] 用例：报告引用点击跳到正确页/记录；已删除的证据不能打开旧缓存；任务暂停/继续/失败批次状态与实际进度一致。
+- [x] 实现原文/档案/趋势/统计标签，档案显示需求、偏好、承诺、待办、冲突及时间线；长任务使用独立任务列表，不阻塞聊天。
+- [x] 历史主界面改为“当前联系人 + 导入聊天记录”；账号选择移到设置，首次导入确认档案关联并创建 UUID。次要入口“选择其他联系人”保留独立离线导入；不再要求主流程先填写账号或手动新建联系人。
+- [x] 运行 `python -m unittest tests.test_profile_ui tests.test_history_statistics tests.test_history_ui -v`，在 100%/125%/150% DPI 检查长中文和键盘导航。
 
+
+> 2026-10-18 完成：`history_statistics.py`（片段/消息分离、可靠时间、不可计算项、重叠来源、fact/inference/unavailable）、`profile_ui.py`（档案/统计/趋势/长任务列表 + 证据跳转）、`history_ui.py` 改“当前联系人 + 导入记录”五标签流程、`history_report.py` 标签化；修复 PySide6 关闭期信号环崩溃。定向 41/68 项通过；真实 `AnalysisStore+HistoryJobs+HistoryReport` 联调与删除来源后证据拒绝通过。100/125/150% DPI 仅 offscreen 布局验证，真实屏幕留 T12。
 ## T9：记忆检索与实时建议整合
 
 **Files:** 新建 `liteapp/memory_retrieval.py`、`liteapp/conversation_binding.py`、`liteapp/realtime.py`；改 `ui.py`、`analysis.py`、`state.py`；新增 `tests/test_memory_retrieval.py`、`tests/test_realtime_memory.py`。
