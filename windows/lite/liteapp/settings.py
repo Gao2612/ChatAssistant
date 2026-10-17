@@ -16,6 +16,9 @@ DEFAULTS = {
     "chatgpt_model": "", "local_model": "", "codex_model": "",
     "backend": "chatgpt", "host_id": "",
     "style": "自然简短，不编造事实", "auto_connect": True, "auto_analysis": True,
+    # Mirror preview is the default: resizing the assistant window never moves or
+    # resizes the native WeChat window. Users can opt into docking explicitly.
+    "dock_wechat": False,
     # Reading backends: ocr (local, offline), api (multimodal vision API),
     # codex (official app-server image input). Reading and analysis are independent.
     "reading_backend": "ocr", "reading_base_url": "", "reading_model": "",

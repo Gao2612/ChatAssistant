@@ -253,8 +253,15 @@ class SettingsPage(QWidget):
         self.auto_connect.setChecked(bool(config.get("auto_connect", False)))
         self.auto_analysis = QCheckBox("自动分析新识别的对话")
         self.auto_analysis.setChecked(bool(config.get("auto_analysis", True)))
+        self.dock_wechat = QCheckBox(
+            "停靠微信窗口（会移动/缩放原生微信；默认关闭，推荐镜像预览）")
+        self.dock_wechat.setChecked(bool(config.get("dock_wechat", True)))
         model_layout.addWidget(self.auto_connect)
         model_layout.addWidget(self.auto_analysis)
+        model_layout.addWidget(self.dock_wechat)
+        model_layout.addWidget(label(
+            "默认镜像预览：应用窗口怎么缩放都不改变原生微信的大小与位置，微信窗口可自由拖动；"
+            "只有勾选“停靠微信窗口”后，应用才会移动/适配原生窗口（此时窗口由应用管理）。", True))
         model_layout.addWidget(label("开启自动分析后，当前可见对话文本会发送给所选分析后端；"
                                      "助手只生成建议，不会代你发送微信消息。", True))
         model_layout.addWidget(label("ChatGPT 套餐需要在本应用单独授权，授权和模型会被记住；"
@@ -498,6 +505,7 @@ class SettingsPage(QWidget):
                        api_key=self.key.text().strip(), style=self.style.currentText().strip(),
                        auto_connect=self.auto_connect.isChecked(),
                        auto_analysis=self.auto_analysis.isChecked(),
+                       dock_wechat=self.dock_wechat.isChecked(),
                        reading_backend=self.reading_backend.currentData(),
                        reading_base_url=self.reading_base.text().strip(),
                        reading_model=self.reading_model.text().strip(),
@@ -1013,6 +1021,10 @@ class MainWindow(QMainWindow):
             manager.detach()
         self._close_aperture()
 
+    def _dock_enabled(self):
+        """Mirror preview by default; legacy configs/tests without the key keep docking."""
+        return bool(self.config.get("dock_wechat", True))
+
     def sync_dock(self):
         manager = getattr(self, "window_manager", None)
         if manager is None:
@@ -1020,6 +1032,13 @@ class MainWindow(QMainWindow):
             return
         source = self._window_source()
         if source is None:
+            if manager.attached:
+                manager.detach()
+            self._close_aperture()
+            return
+        if not self._dock_enabled():
+            # Mirror preview: never move/resize the native WeChat window. If the user
+            # just turned docking off, restore the managed window exactly once.
             if manager.attached:
                 manager.detach()
             self._close_aperture()
@@ -1070,14 +1089,14 @@ class MainWindow(QMainWindow):
             self.nav_history.setChecked(False)
             self.nav_settings.setChecked(False)
             manager = getattr(self, "window_manager", None)
-            if manager is not None:
+            if manager is not None and self._dock_enabled():
                 manager.set_view("chat")
             self.ai_toggle.show()
             QTimer.singleShot(0, self.sync_dock)
 
     def show_history(self):
         manager = getattr(self, "window_manager", None)
-        if manager is not None:
+        if manager is not None and self._dock_enabled():
             manager.set_view("history")
         self._close_aperture()
         if not self.ai_panel.isHidden():
@@ -1094,7 +1113,7 @@ class MainWindow(QMainWindow):
 
     def show_settings(self):
         manager = getattr(self, "window_manager", None)
-        if manager is not None:
+        if manager is not None and self._dock_enabled():
             manager.set_view("settings")
         self._close_aperture()
         if not self.ai_panel.isHidden():
