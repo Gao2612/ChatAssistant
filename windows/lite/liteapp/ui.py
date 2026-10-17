@@ -31,6 +31,18 @@ from .inference_schemas import (
 )
 from .window_manager import WindowManager, rect_to_physical
 
+STYLE_PRESETS = (
+    "自然、简短",
+    "专业、正式",
+    "亲切、热情",
+    "直接、干脆",
+    "幽默、轻松",
+    "高情商、委婉",
+    "商务、谈判",
+    "温柔、耐心",
+    "简洁、书面",
+)
+
 STYLE = """
 QWidget { font-family: "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", sans-serif; font-size: 13px; color: #203044; }
 QMainWindow, QDialog { background: #f3f6fa; }
@@ -182,7 +194,15 @@ class SettingsPage(QWidget):
         self.model_row.addWidget(self.model, 1)
         self.model_row.addWidget(self.fetch_models_button)
         self.model_status = label("", True)
-        self.style = QLineEdit(config.get("style", ""))
+        self.style = NoWheelComboBox()
+        self.style.setEditable(True)
+        self.style.addItems(STYLE_PRESETS)
+        current_style = str(config.get("style") or "").strip() or STYLE_PRESETS[0]
+        index = self.style.findText(current_style)
+        if index >= 0:
+            self.style.setCurrentIndex(index)
+        else:
+            self.style.setEditText(current_style)  # keep a user's custom style
         model_form.addRow("分析后端", self.backend)
         model_form.addRow("API 厂商", self.provider)
         model_form.addRow("兼容/本地服务地址", self.base)
@@ -473,7 +493,7 @@ class SettingsPage(QWidget):
                     raise ValueError("请先读取或输入模型名称。")
             cfg = dict(self.config, wechat_path=self.path.text().strip().strip('"'),
                        backend=backend, base_url=self.base.text().strip(), model=model,
-                       api_key=self.key.text().strip(), style=self.style.text(),
+                       api_key=self.key.text().strip(), style=self.style.currentText().strip(),
                        auto_connect=self.auto_connect.isChecked(),
                        auto_analysis=self.auto_analysis.isChecked(),
                        reading_backend=self.reading_backend.currentData(),

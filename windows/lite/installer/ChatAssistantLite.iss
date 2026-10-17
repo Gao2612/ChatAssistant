@@ -1,6 +1,10 @@
-#define AppName "ChatAssistant Lite"
+﻿#define AppName "ChatAssistant Lite"
 #define AppVersion "0.4.0"
 #define AppExeName "ChatAssistantLite.exe"
+
+[Languages]
+Name: "chinesesimp"; MessagesFile: "languages\ChineseSimplified.isl"
+Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Setup]
 AppId={{AC7EB68E-5B66-4EC9-BDAE-8031008DB76A}
@@ -28,7 +32,7 @@ CloseApplications=yes
 RestartApplications=no
 
 [Tasks]
-Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
+Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加快捷方式："; Flags: unchecked
 
 [Files]
 Source: "..\dist-release\ChatAssistantLite\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -40,4 +44,4 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: deskto
 #endif
 
 [Run]
-Filename: "{app}\{#AppExeName}"; Description: "Launch {#AppName}"; Flags: postinstall nowait skipifsilent
+Filename: "{app}\{#AppExeName}"; Description: "启动 {#AppName}"; Flags: postinstall nowait skipifsilent
