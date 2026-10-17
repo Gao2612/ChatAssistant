@@ -146,3 +146,9 @@
 - 隐藏期间：采集连接保持，识别文字仍为 11 字符（未清空、未断连），微信窗口保持隐藏
 - 恢复：`discovery.restore_window` 后微信重新可见、识别文字保持；测试临时开启的 `auto_connect` 已还原为 false
 - 结论：S-V04 托盘隐藏读取通过（自动检查，未保存聊天内容）；真实点击关闭到托盘的行为一致
+### 候选包 0.5.5（点4 模型记忆修复，2026-10-18）
+
+- 版本 0.5.5；安装包 SHA-256 `1D84EFDA2B70799E3BEEB2ECC5F5913A92B4BE820E02A81C3FCB24801C517B6C`
+- Git `ac23099`（clean）、128 个源文件；`--version-json` 0.5.5；隔离 `--self-test` exit 0；`--smoke` exit 0；`package.ps1 -VerifyInstall` ok=true；已覆盖安装到 `E:\ChatAssistantLite`
+- 点4 真实验证：连续两次关闭/重开 App，设置页均显示“已连接 ChatGPT：ch…@163.com”，账号记录与授权保留，不触发浏览器授权；`chatgpt_model` 选择现在在点选时立即持久化（`settings.remember_model`，不触碰凭据），重开 App 保留
+- 全量 665 项测试 exit 0
