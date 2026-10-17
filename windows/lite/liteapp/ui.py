@@ -13,7 +13,7 @@ from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QPainterPath, QPixmap,
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QPlainTextEdit, QLineEdit, QComboBox, QCheckBox, QFormLayout,
-    QFileDialog, QGroupBox, QScrollArea, QMessageBox,
+    QFileDialog, QGroupBox, QScrollArea, QMessageBox, QSizePolicy,
     QFrame, QStackedWidget, QToolButton, QDialog,
 )
 from . import settings
@@ -46,26 +46,104 @@ STYLE_PRESETS = (
 )
 
 STYLE = """
-QWidget { font-family: "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", sans-serif; font-size: 13px; color: #203044; }
-QMainWindow, QDialog { background: #f3f6fa; }
-QFrame#navigationRail { background: #202d3b; border: 0; }
-QFrame#chatContent, QFrame#aiPanel { background: white; border: 1px solid #dfe6ef; border-radius: 10px; }
-QToolButton { border: 0; border-radius: 9px; padding: 9px; color: #d7e2ef; }
-QToolButton:hover, QToolButton:checked { background: #34485b; color: white; }
-QPushButton#aiToggle { background: white; border: 1px solid #dfe6ef; color: #2469c9; font-weight: 600; }
-QGroupBox { background: white; border: 1px solid #dfe6ef; border-radius: 9px;
- padding: 14px; margin-top: 15px; font-weight: 600; }
-QGroupBox::title { subcontrol-origin: margin; left: 14px; padding: 0 5px; }
-QPushButton { background: #ffffff; border: 1px solid #cbd6e4; border-radius: 6px; padding: 8px 13px; }
-QPushButton:hover { background: #eaf2fe; border-color: #769ac7; }
-QPushButton:disabled { color: #9aa5b4; background: #f2f4f7; }
-QPushButton#primary { color: white; background: #2469c9; border-color: #2469c9; font-weight: 600; }
-QPushButton#primary:disabled { background: #a4bad9; border-color: #a4bad9; }
-QLineEdit, QComboBox, QPlainTextEdit { background: white; border: 1px solid #d5deea; border-radius: 6px; padding: 8px; selection-background-color: #c7dfff; }
-QLabel#muted { color: #65778c; }
-QLabel#title { font-size: 22px; font-weight: 700; }
-QCheckBox { spacing: 7px; }
+/* 哑光纸 + 青瓷：低饱和暖纸面、墨绿文字、青瓷色单一强调。
+   目的：像一张安静的工作台，而不是通用 SaaS 卡片墙。 */
+QWidget {
+    font-family: "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+    font-size: 13px;
+    color: #1F2421;
+    background: transparent;
+}
+QMainWindow, QDialog { background: #F4F2EC; }
+QStackedWidget, QScrollArea, QScrollArea > QWidget > QWidget { background: #F4F2EC; }
+
+/* 左侧导航：深墨绿轨道，只做导航，不做装饰 */
+QFrame#navigationRail { background: #17211E; border: 0; }
+QToolButton {
+    border: 0; border-radius: 8px; padding: 9px;
+    color: #A9B8B1; font-size: 15px;
+}
+QToolButton:hover { background: #22302A; color: #F4F2EC; }
+QToolButton:checked { background: #2A3B33; color: #EAF4EF; }
+
+/* 内容面板：平面 + 细分隔线，不用阴影和层层圆角 */
+QFrame#chatContent, QFrame#aiPanel {
+    background: #FFFFFF; border: 1px solid #DEDBD2; border-radius: 10px;
+}
+QGroupBox {
+    background: #FFFFFF; border: 1px solid #DEDBD2; border-radius: 10px;
+    padding: 16px 14px 13px 14px; margin-top: 16px; font-weight: 600;
+}
+QGroupBox::title {
+    subcontrol-origin: margin; left: 12px; padding: 0 6px;
+    color: #37423D; font-size: 13px; font-weight: 600;
+}
+
+QPushButton {
+    background: #FFFFFF; border: 1px solid #CFCBC0; border-radius: 7px;
+    padding: 7px 13px; color: #1F2421;
+}
+QPushButton:hover { background: #EEF3EF; border-color: #A9BDB4; }
+QPushButton:pressed { background: #E3ECE7; }
+QPushButton:focus { border: 2px solid #2F8F7A; padding: 6px 12px; }
+QPushButton:disabled { color: #9AA39D; background: #F1EFE9; border-color: #E2DFD6; }
+QPushButton#primary {
+    color: #FFFFFF; background: #176B5B; border-color: #176B5B; font-weight: 600;
+}
+QPushButton#primary:hover { background: #12574A; border-color: #12574A; }
+QPushButton#primary:focus { border: 2px solid #0F483D; padding: 6px 12px; }
+QPushButton#primary:disabled { background: #A9C4BA; border-color: #A9C4BA; color: #F7FAF8; }
+
+QLineEdit, QComboBox, QPlainTextEdit {
+    background: #FFFFFF; border: 1px solid #D5D1C6; border-radius: 7px;
+    padding: 7px 9px; color: #1F2421;
+    selection-background-color: #CFE6DC; selection-color: #10231D;
+}
+QLineEdit:focus, QComboBox:focus, QPlainTextEdit:focus {
+    border: 2px solid #2F8F7A; padding: 6px 8px;
+}
+QComboBox::drop-down { border: 0; width: 22px; }
+QComboBox QAbstractItemView {
+    background: #FFFFFF; border: 1px solid #D5D1C6; border-radius: 7px;
+    selection-background-color: #E7F1EC; selection-color: #10231D; padding: 3px;
+}
+QPlainTextEdit { line-height: 150%; }
+
+QLabel#muted { color: #6B746E; }
+QLabel#title { font-size: 20px; font-weight: 700; color: #1F2421; }
+QLabel#sectionTitle { font-size: 15px; font-weight: 600; color: #26302B; }
+QLabel#statusGood { color: #176B5B; }
+QLabel#statusWarn { color: #96661F; }
+QCheckBox { spacing: 8px; color: #37423D; }
+QCheckBox::indicator { width: 15px; height: 15px; }
+QCheckBox:focus { outline: none; }
+
+QPushButton#aiToggle {
+    background: #FFFFFF; border: 1px solid #DEDBD2; border-left: 0;
+    border-radius: 0 8px 8px 0; color: #176B5B; font-weight: 600;
+}
+QPushButton#aiToggle:hover { background: #E7F1EC; }
+QPushButton#aiToggle:checked { background: #176B5B; color: #FFFFFF; border-color: #176B5B; }
+
+QScrollBar:vertical { background: transparent; width: 10px; margin: 2px; }
+QScrollBar::handle:vertical { background: #CFCBC0; border-radius: 4px; min-height: 28px; }
+QScrollBar::handle:vertical:hover { background: #A9BDB4; }
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+QFrame#divider { background: #DEDBD2; max-height: 1px; border: 0; }
 """
+
+
+def section_title(text):
+    widget = label(text)
+    widget.setObjectName("sectionTitle")
+    return widget
+
+
+def divider():
+    line = QFrame()
+    line.setObjectName("divider")
+    line.setFrameShape(QFrame.Shape.HLine)
+    return line
 
 
 def label(text="", muted=False):
@@ -711,9 +789,9 @@ class MainWindow(QMainWindow):
     def __init__(self, config=None, scanning=True, window_manager=None, account_store=None,
                  inference_queue=None):
         super().__init__()
-        self.setWindowTitle("微信实时助手 · 便捷版 0.4.3")
-        self.resize(1180, 790)
-        self.setMinimumSize(850, 600)
+        self.setWindowTitle("微信实时助手 · 便捷版 0.5.0")
+        self.resize(1180, 680)
+        self.setMinimumSize(980, 600)
         self.setStyleSheet(STYLE)
         self.config = config if config is not None else settings.load()
         self._account_store = account_store
@@ -801,15 +879,18 @@ class MainWindow(QMainWindow):
         self.nav_chat = QToolButton()
         self.nav_chat.setText("▤")
         self.nav_chat.setToolTip("聊天")
+        self.nav_chat.setAccessibleName("聊天")
         self.nav_chat.setCheckable(True)
         self.nav_chat.setChecked(True)
         self.nav_history = QToolButton()
         self.nav_history.setText("▦")
         self.nav_history.setToolTip("历史记录")
+        self.nav_history.setAccessibleName("历史记录")
         self.nav_history.setCheckable(True)
         self.nav_settings = QToolButton()
         self.nav_settings.setText("⚙")
         self.nav_settings.setToolTip("设置")
+        self.nav_settings.setAccessibleName("设置")
         self.nav_settings.setCheckable(True)
         self.nav_chat.clicked.connect(self.show_chat)
         self.nav_history.clicked.connect(self.show_history)
@@ -822,6 +903,11 @@ class MainWindow(QMainWindow):
         layout.addWidget(rail)
 
         self.page_stack = QStackedWidget()
+        # Hidden settings/history pages must not raise the whole stack minimum
+        # width on small screens; each page scrolls or reflows instead.
+        self.page_stack.setMinimumSize(0, 0)
+        self.page_stack.setSizePolicy(QSizePolicy.Policy.Ignored,
+                                      QSizePolicy.Policy.Ignored)
         self.chat_page = QWidget()
         chat_layout = QVBoxLayout(self.chat_page)
         chat_layout.setContentsMargins(20, 18, 16, 14)
@@ -831,10 +917,16 @@ class MainWindow(QMainWindow):
         self.chat_title.setObjectName("title")
         chat_header.addWidget(self.chat_title, 1)
         self.connection_status = label("未连接微信", True)
+        self.connection_status.setSizePolicy(QSizePolicy.Policy.Ignored,
+                                             QSizePolicy.Policy.Preferred)
         chat_header.addWidget(self.connection_status)
         self.effective_label = label("分析：未配置", True)
+        self.effective_label.setSizePolicy(QSizePolicy.Policy.Ignored,
+                                           QSizePolicy.Policy.Preferred)
         chat_header.addWidget(self.effective_label)
         self.analysis_status = label("等待分析", True)
+        self.analysis_status.setSizePolicy(QSizePolicy.Policy.Ignored,
+                                           QSizePolicy.Policy.Preferred)
         chat_header.addWidget(self.analysis_status)
         chat_layout.addLayout(chat_header)
 
@@ -846,19 +938,21 @@ class MainWindow(QMainWindow):
         chat_content_layout = QVBoxLayout(chat_content)
         chat_content_layout.setContentsMargins(12, 10, 12, 10)
         chat_content_layout.setSpacing(8)
-        chat_content_layout.addWidget(label("微信窗口画面", True))
-        self.preview = QLabel("连接微信后在这里显示实时画面")
+        chat_content_layout.addWidget(label("聊天画面（只读）", True))
+        self.preview = QLabel("连接微信后，当前聊天画面会显示在这里\n右侧会同步给出建议")
         self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.preview.setMinimumHeight(340)
-        self.preview.setStyleSheet("background: #edf1f5; border-radius: 7px; color: #65778c;")
+        self.preview.setMinimumHeight(200)
+        self.preview.setStyleSheet(
+            "background: #F1EFE8; border: 1px dashed #D5D1C6; border-radius: 8px; "
+            "color: #6B746E; padding: 18px;")
         self.preview_image = None
         chat_content_layout.addWidget(self.preview, 1)
-        chat_content_layout.addWidget(label("当前识别文字", True))
+        chat_content_layout.addWidget(label("识别到的聊天文字（只读）", True))
         self.editor = QPlainTextEdit()
         self.editor.setReadOnly(True)
         self.editor.setPlaceholderText("等待识别到聊天内容")
         self.editor.setObjectName("conversationText")
-        self.editor.setMaximumHeight(124)
+        self.editor.setMaximumHeight(90)
         chat_content_layout.addWidget(self.editor)
         self.notice = label(self.config.get("_warning", ""), True)
         chat_content_layout.addWidget(self.notice)
@@ -866,7 +960,7 @@ class MainWindow(QMainWindow):
 
         self.ai_panel = QFrame()
         self.ai_panel.setObjectName("aiPanel")
-        self.ai_panel.setFixedWidth(320)
+        self.ai_panel.setFixedWidth(300)
         self.ai_panel.setVisible(False)
         result_layout = QVBoxLayout(self.ai_panel)
         result_layout.setContentsMargins(12, 10, 12, 10)
@@ -944,7 +1038,8 @@ class MainWindow(QMainWindow):
         self.auto_analysis.toggled.connect(self.auto_toggled)
         layout.addWidget(self.page_stack, 1)
 
-        self.ai_toggle = QPushButton("✦\nA\nI\n建\n议")
+        self.ai_toggle = QPushButton("AI\n建\n议")
+        self.ai_toggle.setAccessibleName("AI 建议面板")
         self.ai_toggle.setObjectName("aiToggle")
         self.ai_toggle.setCheckable(True)
         self.ai_toggle.setFixedWidth(38)
@@ -991,7 +1086,7 @@ class MainWindow(QMainWindow):
     def clear_preview(self):
         self.preview_image = None
         self.preview.clear()
-        self.preview.setText("连接微信后在这里显示实时画面")
+        self.preview.setText("连接微信后，当前聊天画面会显示在这里\n右侧会同步给出建议")
 
     # -- native docking: WindowManager + capture health (T4-UI) -------------
     @staticmethod
