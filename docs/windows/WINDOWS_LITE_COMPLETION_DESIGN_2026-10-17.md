@@ -142,6 +142,13 @@ ChatGPT 路由继续使用 Responses HTTP 流、`store:false`、`stream:true`，
 
 新增不可变 `ScopeKey(wechat_account_id, person_id)`，所有读、写、检索、导入、报告、删除都必须接收它并在数据库验证归属。显示名称可改，稳定 ID 不变。旧账号字符串摘要迁移为本地账号档案，旧片段保留为 `fragment`，不伪造为标准消息。
 
+#### 7.1.1 实现补充（2026-10-18，T5）
+
+- V2 库六表：`wechat_accounts / people / sources / records / scope_state / derived_memory`，`PRAGMA user_version=2`；所有公开持久方法强制 `ScopeKey` 并在 SQL 中校验联系人/账号归属，跨 scope 的 person/source/record 读写删一律 `ScopeMismatchError`。
+- 版本语义：`source_set_version` 与 `memory_version` 在导入/修订/删除时递增；`iter_records(scope, source_version)` 版本不符抛 `StaleSourceVersionError`（fail-closed）；`snapshot(scope)` 冻结来源 ID、版本与 `EvidenceRef` 范围；`delete_source` 同时失效该范围派生记忆。
+- 0.2 迁移：只读校验旧库 → SQLite backup API 受控备份并校验 → 单事务校验数量/顺序/摘要后建 V2 表，旧片段保留 `fragment`；任一步失败回滚且旧库字节不变；未知/更高 schema 版本拒绝写入。
+- UI 调用方只做 T5 最小适配（联系人 userData 用 `ScopeKey`、stats dataclass）；导入任务与进度 UI 由 T6 的 `importers + ImportJobs` 替换。
+
 | 数据对象 | 关键字段/用途 |
 | --- | --- |
 | `wechat_accounts` | UUID、加密标签、旧账号映射；不冒称获取到了微信内部账号 ID |

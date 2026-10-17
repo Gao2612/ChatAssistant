@@ -29,8 +29,8 @@
 | T2 账号注册与授权生命周期 | 🟡 队友 inference 实现中（task-4） | `account_store.py` + settings/subscription；UI 由 Lead 集成 |
 | T3 通用模型层/取消/调度 | 🟡 队友 inference 排队（task-5，T2 后做） | `inference*.py` + analysis/subscription |
 | T4 原生停靠/焦点/恢复 | 🟡 队友 windows 实现中（task-6） | `window_manager.py`、`recovery_guard.py` + 合成窗口 fixture |
-| T5 历史 V2/迁移 | 🟡 队友 history 实现中（task-7） | `history_models.py`、`history_migrations.py`、history.py |
-| T6 导入器 | 🟡 队友 history 排队（task-8，T5 后做） | importers/ + import_jobs.py |
+| T5 历史 V2/迁移 | ✅ 2026-10-18 完成（commit 待记） | `history_models.py`、`history_migrations.py`、V2 `history.py`；强制 ScopeKey/版本语义/事务迁移/DPAPI；历史定向 38 项、排除 T4 线的全模块 199 项通过；T6 进行中 |
+| T6 导入器 | 🟡 队友 history 实现中（task-8，T5 后开始） | importers/ + import_jobs.py；pypdfium2 5.14.0 已入 venv |
 | OCR 后自动分析 | 回归修复已落码，单测通过 | `state.py` 修订语义 + `ui.py` 重检恢复；`test_auto_pipeline.py` 4 项。0.2 安装包不包含该修复，需安装 0.3 包 |
 | 读取/分析独立配置 | ✅ 2026-10-18 已落码，单测通过 | `settings.py`（读取键 + DPAPI `protected_reading_key`）、`backends.py`、`reading.py`、`codex_backend.py`、`worker.py`、`ui.py`；86 项测试通过 |
 | 读取后端：本地 OCR | 默认保留，完全离线 | `worker.py`；原有验证 |

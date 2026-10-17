@@ -12,10 +12,10 @@ TOPICS = {
 }
 
 
-def build_local_report(store, person_id):
+def build_local_report(store, scope):
     """Count all rows; report literal evidence without invented traits or sentiment."""
-    totals = store.stats(person_id)
-    if not totals["section_count"]:
+    totals = store.stats(scope)
+    if not totals.record_count:
         return "尚未导入文字记录。"
     months = Counter()
     topics = Counter()
@@ -25,7 +25,7 @@ def build_local_report(store, person_id):
     processed = 0
     offset = 0
     while True:
-        page = store.list_messages(person_id, offset=offset, limit=500)
+        page = store.list_messages(scope, offset=offset, limit=500)
         if not page:
             break
         for row in page:
@@ -48,7 +48,7 @@ def build_local_report(store, person_id):
                 evidence.append(f"- {row['source_name']} / {row['label']} [{', '.join(found)}]：{text[:180]}")
         offset += len(page)
     result = ["本地历史整理报告", "",
-              f"范围：{totals['source_count']} 个导入文件，{processed} 个文字片段，约 {totals['char_count']} 字。",
+              f"范围：{totals.source_count} 个导入文件，{processed} 个文字片段，约 {totals.char_count} 字。",
               "该报告覆盖全部已导入文字片段；缺失记录与扫描 PDF 不在范围内。", "",
               "客户画像线索（仅列明确文字证据，不推断性格或真实意图）"]
     result.extend(evidence or ["未发现预算、交期、产品或售后等明确线索。"])

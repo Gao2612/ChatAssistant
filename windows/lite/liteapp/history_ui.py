@@ -1,4 +1,10 @@
-"""History import and browsing page. Imported text stays local until an explicit model task."""
+"""History import and browsing page. Imported text stays local until an explicit model task.
+
+T5 临时适配：HistoryStore 的公开 API 已收紧为 ScopeKey（不再接受 person_id 快捷
+入口），本文件只做了把联系人 combobox 的 userData 从 person_id 换成 ScopeKey、
+以及 stats() 从 dict 改为 dataclass 字段的最小改动，未加导入任务/进度 UI。
+T6 会用 liteapp.importers + ImportJobs 替换这里 import_file 的导入语义。
+"""
 from pathlib import Path
 
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
@@ -99,16 +105,22 @@ class HistoryPage(QWidget):
             self._store = HistoryStore()
         return self._store
 
+    def _select_scope(self, scope):
+        """Select a ScopeKey in the combobox by value (PySide findData is identity-based)."""
+        for index in range(self.persons.count()):
+            if self.persons.itemData(index) == scope:
+                self.persons.setCurrentIndex(index)
+                return index
+        return -1
+
     def refresh_people(self):
         self.report.clear()
         selected = self.persons.currentData()
         self.persons.blockSignals(True)
         self.persons.clear()
         for person in self.store.list_people(self.account.text().strip() or "default"):
-            self.persons.addItem(person["display_name"], person["id"])
-        index = self.persons.findData(selected)
-        if index >= 0:
-            self.persons.setCurrentIndex(index)
+            self.persons.addItem(person.display_name, person.scope)
+        self._select_scope(selected)
         self.persons.blockSignals(False)
         self.offset = 0
         self.load_page()
@@ -116,10 +128,10 @@ class HistoryPage(QWidget):
     def create_person(self, display_name, account_key=None):
         if account_key is not None:
             self.account.setText(account_key)
-        person_id = self.store.create_person(display_name, self.account.text().strip() or "default")
+        scope = self.store.create_person(display_name, self.account.text().strip() or "default")
         self.refresh_people()
-        self.persons.setCurrentIndex(self.persons.findData(person_id))
-        return person_id
+        self._select_scope(scope)
+        return scope
 
     def prompt_person(self):
         name, ok = QInputDialog.getText(self, "新建联系人", "联系人名称")
@@ -136,12 +148,12 @@ class HistoryPage(QWidget):
             self.import_path(path)
 
     def import_path(self, path):
-        person_id = self.persons.currentData()
-        if not person_id:
+        scope = self.persons.currentData()
+        if not scope:
             self.status.setText("请先为这份记录选择或新建联系人。")
             return
         try:
-            result = self.store.import_file(Path(path), person_id)
+            result = self.store.import_file(scope, Path(path))
         except (HistoryImportError, OSError, ValueError) as error:
             self.status.setText(str(error))
             return
@@ -157,44 +169,44 @@ class HistoryPage(QWidget):
             f"[{row['source_name']} · {row['label']}]\n{row['text']}" for row in rows))
 
     def load_page(self, *_):
-        person_id = self.persons.currentData()
-        if not person_id:
+        scope = self.persons.currentData()
+        if not scope:
             self.records.clear()
             self.summary.setText("先创建联系人，再导入 HTML 或 PDF。")
             self.previous_button.setEnabled(False)
             self.next_button.setEnabled(False)
             return
-        totals = self.store.stats(person_id)
-        rows = self.store.list_messages(person_id, offset=self.offset, limit=self.PAGE_SIZE)
+        totals = self.store.stats(scope)
+        rows = self.store.list_messages(scope, offset=self.offset, limit=self.PAGE_SIZE)
         self._set_records(rows)
-        self.summary.setText(f"已导入 {totals['source_count']} 个文件，"
-                             f"{totals['section_count']} 个文字片段，约 {totals['char_count']} 字。"
+        self.summary.setText(f"已导入 {totals.source_count} 个文件，"
+                             f"{totals.record_count} 个文字片段，约 {totals.char_count} 字。"
                              "来源与范围以导入文件为准。")
         self.page_label.setText(f"第 {self.offset // self.PAGE_SIZE + 1} 页")
         self.previous_button.setEnabled(self.offset > 0)
-        self.next_button.setEnabled(self.offset + self.PAGE_SIZE < totals["section_count"])
+        self.next_button.setEnabled(self.offset + self.PAGE_SIZE < totals.record_count)
 
     def search_records(self):
-        person_id = self.persons.currentData()
-        if not person_id:
+        scope = self.persons.currentData()
+        if not scope:
             return
         query = self.query.text().strip()
         if not query:
             self.offset = 0
             self.load_page()
             return
-        rows = self.store.search(person_id, query, limit=100)
+        rows = self.store.search(scope, query, limit=100)
         self._set_records(rows)
         self.status.setText(f"找到 {len(rows)} 条匹配（最多显示 100 条）。")
         self.previous_button.setEnabled(False)
         self.next_button.setEnabled(False)
 
     def generate_report(self):
-        person_id = self.persons.currentData()
-        if not person_id:
+        scope = self.persons.currentData()
+        if not scope:
             self.status.setText("请先选择联系人并导入聊天记录。")
             return
-        self.report.setPlainText(build_local_report(self.store, person_id))
+        self.report.setPlainText(build_local_report(self.store, scope))
         self.tabs.setCurrentIndex(1)
         self.status.setText("已整理全部已导入的文字；报告仅依据文件中可识别的信息。")
 

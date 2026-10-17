@@ -146,10 +146,12 @@ HistoryStore.snapshot(scope: ScopeKey) -> SourceSnapshot
 
 `ImportedRecord` 包含正文、原始顺序、message/fragment 类型、可空发言人/时间、locator、质量标记。`SourceSnapshot` 固定 source IDs、版本、record/字符范围清单。现有 list/search/stats 方法同步增加 ScopeKey，不保留可跨账号调用的快捷入口。
 
-- [ ] 用例：跨账号 person_id/source_id 的读、删、导入均被拒绝；同名联系人独立；删除来源同步提高版本并失效派生记忆。
-- [ ] 构造 0.2 加密数据库，迁移前后原文数量/顺序/摘要一致；旧片段保留 fragment 类型；中途失败回滚，不留下部分新表数据。
-- [ ] 实现事务迁移、受控备份、schema 版本门禁和强制 scope 查询；持久内容仍由 DPAPI 保护。
-- [ ] 运行 `python -m unittest tests.test_history tests.test_history_v2 tests.test_history_migrations -v`；检查数据库文件不含合成样本明文标识。
+- [x] 用例：跨账号 person_id/source_id 的读、删、导入均被拒绝；同名联系人独立；删除来源同步提高版本并失效派生记忆。
+- [x] 构造 0.2 加密数据库，迁移前后原文数量/顺序/摘要一致；旧片段保留 fragment 类型；中途失败回滚，不留下部分新表数据。
+- [x] 实现事务迁移、受控备份、schema 版本门禁和强制 scope 查询；持久内容仍由 DPAPI 保护。
+- [x] 运行 `python -m unittest tests.test_history tests.test_history_v2 tests.test_history_migrations -v`；检查数据库文件不含合成样本明文标识。
+
+> 2026-10-18 完成：`history_models.py`（frozen 模型 + fail-closed）、`history_migrations.py`（受控备份、单事务迁移、user_version 门禁、失败回滚）、`history.py` V2 六表强制 `ScopeKey`；`source_set_version`/`memory_version` 语义、`iter_records` 版本不符 fail-closed、`delete_source` 失效派生记忆；`history_ui.py`/`history_report.py` 最小适配（T6 用 ImportJobs 替换）。定向历史 38 项通过；排除并行 T4 窗口线的全模块 199 项通过；DPAPI 明文扫描 PASS。接口清单见 `_reports/T5_report.md` §3。
 
 ## T6：HTML/PDF 解析、源位置与导入任务
 
