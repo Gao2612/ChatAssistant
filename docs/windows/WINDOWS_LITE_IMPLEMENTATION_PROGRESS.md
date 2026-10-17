@@ -37,7 +37,7 @@
 | T7 全量历史模型分析 | ✅ 2026-10-18 完成，commit 待记 | history_jobs/prompts/analysis_store；定向 37、全套 459 项通过；合成真实 job 覆盖率 1.0/7 证据回读；设置模型 V4.1-Flash-1017 被 DeepSeek 400 拒绝（真实分析前需改选 deepseek-flash 等） |
 | T8 档案/趋势/统计/任务界面 | ✅ 2026-10-18 完成，commit `0000cd4` | history_statistics/profile_ui + history_ui 五标签；定向 41/68 项、真实 T7 联调通过；PySide6 关闭期崩溃已修；DPI 真实屏幕留 T12 |
 | T9 记忆检索与实时建议整合 | 🟡 UI 集成完成（今日提交）：会话↔联系人绑定 + 历史参考注入 + “参考历史 N 条”入口；真实模型长上下文/引用展示实机验收留 T12 | 未绑定不检索；切换会话/窗口失效；434/634 全量通过；真实模型回合与 T12 集中验收待做 |
-| T10 多微信来源调度 | 🟡 核心完成（source_registry/capture_scheduler + 10 项测试）；UI 多窗口接线与真实双窗口 30 分钟留 T12 | active 优先、后台默认关闭、最小化暂停、帧未变不重复 OCR、单源关闭不影响其他 | `source_registry.py`/`capture_scheduler.py` |
+| T10 多微信来源调度 | 🟡 代码完成（registry/scheduler/background monitor + 15 项测试，UI 开关默认关闭、最多 2 个后台来源）；真实双窗口 30 分钟与 CPU/句柄趋势留 T12 | active 优先、后台默认关闭、最小化暂停、帧未变不重复 OCR、单源关闭不影响其他；后台不移动/不键入窗口 | `source_registry.py`/`capture_scheduler.py` |
 | T11 构建追溯与安装生命周期 | 🟡 0.4.1 已重建并验证（build_info 摘要 clean、中文安装器、隔离 install/self-test/uninstall 保留数据 ok=true、安装版 version/self-test/smoke×3 exit 0）；干净 VM 与真实升级留 T12 | 安装包 SHA256 `F8EC437C…2DC69E`；安装版 0.4.1 已覆盖安装到 `E:\ChatAssistantLite` |
 | T12 集中实机验收 | 🟡 候选包 0.4.1（SHA256 `F8EC437C…2DC69E`）已装；自动项（version/self-test/smoke×3、隔离 install 生命周期）通过，11 项真实场景逐项进行中 | 面板 S-V01…S-V11，做一项同步一项；人工扫码/输入法/弹窗/双窗口等待用户在场 |
 | S-安装包中文化 | ✅ commit `f9e7c6d` | 内置简体中文语言文件（向导/卸载/任务/启动描述），ISCC 编译通过；随下一版安装包生效 |
