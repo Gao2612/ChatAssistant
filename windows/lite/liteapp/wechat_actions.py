@@ -1,4 +1,4 @@
-﻿"""WeChat conversation selection and message sending for an explicitly chosen chat.
+"""WeChat conversation selection and message sending for an explicitly chosen chat.
 
 S-AUTO-SEND (task-19). The user explicitly authorized one acceptance run on a
 chosen conversation; this module provides the reusable, testable primitives:
@@ -683,19 +683,32 @@ def _read_title_via_ocr(hwnd, title_rect, *, dpi=96):
             pass
         if not frames:
             return None
-        image = frames[0]
+        image = frames[0][:, :, ::-1]  # WGC gives BGRA; OCR expects RGB
         scale = dpi_scale(dpi)
-        left, top, right, bottom = (int(round(value * scale))
-                                    for value in (int(v) for v in title_rect))
-        height, width = image.shape[0], image.shape[1]
-        left, top = max(0, left), max(0, top)
-        right, bottom = min(width, right), min(height, bottom)
-        if right <= left or bottom <= top:
-            return None
-        crop = image[top:bottom, left:right]
+        if title_rect is None:
+            # Reuse the proven app OCR path: detect the chat header, then OCR it.
+            try:
+                from vendor.area import chat_area
+            except ImportError:
+                return None
+            area = chat_area(np.ascontiguousarray(image),
+                             max(45, round(60 * scale)))
+            if area is None:
+                return None
+            x0, y0, x1, y1, _bg, top = area
+            crop = image[top:y0, x0:x1]
+        else:
+            left, top, right, bottom = (
+                int(round(value * scale)) for value in (int(v) for v in title_rect))
+            height, width = image.shape[0], image.shape[1]
+            left, top = max(0, left), max(0, top)
+            right, bottom = min(width, right), min(height, bottom)
+            if right <= left or bottom <= top:
+                return None
+            crop = image[top:bottom, left:right]
         if not crop.size:
             return None
-        title = read_title(crop)
+        title = read_title(np.ascontiguousarray(crop))
         return title or None
     except (OSError, RuntimeError, ValueError):
         return None
