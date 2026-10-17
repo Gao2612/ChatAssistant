@@ -1,18 +1,21 @@
 """History import and browsing page. Imported text stays local until an explicit model task.
 
-T5 临时适配：HistoryStore 的公开 API 已收紧为 ScopeKey（不再接受 person_id 快捷
-入口），本文件只做了把联系人 combobox 的 userData 从 person_id 换成 ScopeKey、
-以及 stats() 从 dict 改为 dataclass 字段的最小改动，未加导入任务/进度 UI。
-T6 会用 liteapp.importers + ImportJobs 替换这里 import_file 的导入语义。
+T5：HistoryStore 的公开 API 已收紧为 ScopeKey（不再接受 person_id 快捷入口），
+联系人 combobox 的 userData 是 ScopeKey。
+T6：导入改走 liteapp.import_jobs.ImportJobs（后台线程 + 进度 + 取消），解析器是
+liteapp.importers（HTML 安全纯文本 / PDF pypdfium2 受控子进程），导入完成后才一次性
+提交加密历史库；`import_path` 仍保留同步语义供测试与显式小文件路径使用。
 """
 from pathlib import Path
 
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
                                QPushButton, QComboBox, QPlainTextEdit, QFileDialog,
-                               QInputDialog, QTabWidget)
+                               QInputDialog, QTabWidget, QCheckBox)
 
 from .history import HistoryStore, HistoryImportError
 from .history_report import build_local_report
+from .import_jobs import ImportJobError, ImportJobs
 
 
 class HistoryPage(QWidget):
@@ -51,11 +54,24 @@ class HistoryPage(QWidget):
         self.import_button = QPushButton("导入 HTML / PDF")
         self.import_button.clicked.connect(self.choose_file)
         person_row.addWidget(self.import_button)
+        self.cancel_import_button = QPushButton("取消导入")
+        self.cancel_import_button.setEnabled(False)
+        self.cancel_import_button.clicked.connect(self.cancel_active_import)
+        person_row.addWidget(self.cancel_import_button)
         layout.addLayout(person_row)
+
+        ocr_row = QHBoxLayout()
+        self.page_ocr = QCheckBox("扫描页本地 OCR（较慢，仅对无文字页）")
+        ocr_row.addWidget(self.page_ocr)
+        ocr_row.addStretch(1)
+        layout.addLayout(ocr_row)
 
         self.summary = QLabel("选择联系人后可查看导入范围和记录。")
         self.summary.setWordWrap(True)
         layout.addWidget(self.summary)
+        self.progress_label = QLabel("")
+        self.progress_label.setWordWrap(True)
+        layout.addWidget(self.progress_label)
         search_row = QHBoxLayout()
         self.query = QLineEdit()
         self.query.setPlaceholderText("搜索这个联系人的全部已导入文字")
@@ -96,6 +112,11 @@ class HistoryPage(QWidget):
         self.status = QLabel("")
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
+        self._jobs = None
+        self._active_import = None
+        self._import_timer = QTimer(self)
+        self._import_timer.setInterval(200)
+        self._import_timer.timeout.connect(self._poll_import)
         if self._store is not None:
             self.refresh_people()
 
@@ -104,6 +125,115 @@ class HistoryPage(QWidget):
         if self._store is None:
             self._store = HistoryStore()
         return self._store
+
+    @property
+    def jobs(self):
+        if self._jobs is None:
+            self._jobs = ImportJobs(self.store)
+        return self._jobs
+
+    # ------------------------------------------------------------- import jobs
+    def active_import_job(self):
+        return self._active_import
+
+    def start_import_path(self, path):
+        """Start a background import for the selected contact; returns job id."""
+        scope = self.persons.currentData()
+        if not scope:
+            self.status.setText("请先为这份记录选择或新建联系人。")
+            return None
+        if self._active_import is not None:
+            self.status.setText("已有导入任务在进行，请等待完成或取消。")
+            return None
+        try:
+            job_id = self.jobs.start(scope, Path(path), self.page_ocr.isChecked())
+        except (TypeError, ValueError) as error:
+            self.status.setText(str(error))
+            return None
+        self._active_import = job_id
+        self.import_button.setEnabled(False)
+        self.cancel_import_button.setEnabled(True)
+        self.progress_label.setText("正在识别文件格式…")
+        self._import_timer.start()
+        return job_id
+
+    def cancel_active_import(self):
+        if self._active_import is None:
+            return
+        try:
+            self.jobs.cancel(self._active_import)
+        except ImportJobError:
+            pass
+        self.cancel_import_button.setEnabled(False)
+        self.progress_label.setText("正在取消导入（不会保存半条记录）…")
+
+    def _progress_text(self, progress):
+        parts = [f"导入中（{progress.phase}）"]
+        if progress.format_kind:
+            parts.append({"html": "HTML", "pdf": "PDF",
+                          "exportwechat_html": "ExportWeChat 特征/通用回退"}.get(
+                              progress.format_kind, progress.format_kind))
+        if progress.page_count:
+            parts.append(f"{progress.pages_done}/{progress.page_count} 页")
+        parts.append(f"{progress.record_count} 个文字片段")
+        if progress.failure_count:
+            parts.append(f"{progress.failure_count} 页解析失败")
+        return "；".join(parts)
+
+    def _poll_import(self):
+        job_id = self._active_import
+        if job_id is None:
+            self._import_timer.stop()
+            return
+        try:
+            progress = self.jobs.progress(job_id)
+        except ImportJobError:
+            self._active_import = None
+            self._import_timer.stop()
+            self.import_button.setEnabled(True)
+            self.cancel_import_button.setEnabled(False)
+            self.status.setText("导入任务已丢失，请重新导入。")
+            return
+        if progress.finished:
+            self._finish_import(progress)
+        else:
+            self.progress_label.setText(self._progress_text(progress))
+
+    def _finish_import(self, progress):
+        self._import_timer.stop()
+        self._active_import = None
+        self.import_button.setEnabled(True)
+        self.cancel_import_button.setEnabled(False)
+        if progress.status == "succeeded":
+            self.query.clear()
+            self.report.clear()
+            self.offset = 0
+            self.refresh_people()
+            if progress.duplicate:
+                self.progress_label.setText("该文件此前已导入，未新增记录。")
+                self.status.setText("已存在相同文件，未重复导入。")
+            else:
+                self.progress_label.setText(
+                    f"完成：{progress.record_count} 个文字片段，约 {progress.char_count} 字"
+                    + (f"；{progress.failure_count} 页解析失败。" if progress.failure_count
+                       else "。"))
+                self.status.setText(
+                    f"已导入 {progress.record_count} 个文字片段；内容仅保存在本机。")
+        elif progress.status == "cancelled":
+            self.progress_label.setText("已取消，未保存任何记录。")
+            self.status.setText("导入已取消；历史库未写入半条记录。")
+        else:
+            self.progress_label.setText("")
+            self.status.setText(f"导入失败：{progress.error or '未知错误'}")
+
+    def closeEvent(self, event):
+        if self._active_import is not None:
+            try:
+                self.jobs.cancel(self._active_import)
+            except ImportJobError:
+                pass
+        self._import_timer.stop()
+        super().closeEvent(event)
 
     def _select_scope(self, scope):
         """Select a ScopeKey in the combobox by value (PySide findData is identity-based)."""
@@ -145,24 +275,21 @@ class HistoryPage(QWidget):
         path, _ = QFileDialog.getOpenFileName(self, "导入聊天记录", "",
                                               "聊天记录 (*.html *.htm *.pdf)")
         if path:
-            self.import_path(path)
+            self.start_import_path(path)
 
     def import_path(self, path):
+        """Synchronous import (tests / explicit small files); async path is choose_file."""
         scope = self.persons.currentData()
         if not scope:
             self.status.setText("请先为这份记录选择或新建联系人。")
-            return
+            return None
         try:
-            result = self.store.import_file(scope, Path(path))
+            progress = self.jobs.run_sync(scope, Path(path), self.page_ocr.isChecked())
         except (HistoryImportError, OSError, ValueError) as error:
             self.status.setText(str(error))
-            return
-        self.query.clear()
-        self.report.clear()
-        self.offset = 0
-        self.load_page()
-        self.status.setText(("已存在相同文件，未重复导入。" if result["duplicate"] else
-                             f"已导入 {result['section_count']} 个文字片段；内容仅保存在本机。"))
+            return None
+        self._finish_import(progress)
+        return progress
 
     def _set_records(self, rows):
         self.records.setPlainText("\n\n".join(
