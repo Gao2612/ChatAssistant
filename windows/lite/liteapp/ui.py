@@ -281,6 +281,20 @@ class SettingsPage(QWidget):
         style_row.addWidget(self.style_profile_button)
         style_row.addWidget(self.style_profile_status, 1)
         model_layout.addLayout(style_row)
+        auto_row = QHBoxLayout()
+        auto_row.addWidget(label("自动操作", True))
+        self.auto_target = QLineEdit()
+        self.auto_target.setPlaceholderText("联系人名称，如：郜亚禹")
+        self.auto_find_button = QPushButton("自动查找并切换对话")
+        self.auto_send_allowed = QCheckBox("允许把建议发送到微信")
+        self.auto_send_allowed.setChecked(bool(config.get("auto_send_allowed", False)))
+        auto_row.addWidget(self.auto_target, 1)
+        auto_row.addWidget(self.auto_find_button)
+        auto_row.addWidget(self.auto_send_allowed)
+        model_layout.addLayout(auto_row)
+        model_layout.addWidget(label(
+            "自动操作会短暂激活微信窗口（托盘隐藏时会临时恢复），完成或失败后恢复原状态；"
+            "发送前校验当前会话标题，发送后校验输入框清空与气泡出现；默认不自动发送，需你点击发送并确认。", True))
         body.addWidget(model_group)
 
         codex_group = QGroupBox("Codex 账户（读取与分析的共用选项）")
@@ -513,6 +527,7 @@ class SettingsPage(QWidget):
                        auto_connect=self.auto_connect.isChecked(),
                        auto_analysis=self.auto_analysis.isChecked(),
                        dock_wechat=self.dock_wechat.isChecked(),
+                       auto_send_allowed=self.auto_send_allowed.isChecked(),
                        reading_backend=self.reading_backend.currentData(),
                        reading_base_url=self.reading_base.text().strip(),
                        reading_model=self.reading_model.text().strip(),
@@ -616,6 +631,7 @@ class ResultBus(QObject):
     read_done = Signal(object, object, str)
     account_done = Signal(str, object, str)
     style_done = Signal(str, object, str)
+    wechat_action_done = Signal(str, object, str)
     queue_event = Signal(object)
 
 
@@ -699,6 +715,7 @@ class MainWindow(QMainWindow):
         self.account_busy = False
         self._style_profile = None
         self.style_busy = False
+        self.wechat_busy = False
         self.state = ConversationState()
         self.child = self.stop_event = self.capture_q = None
         self.window_item = None
@@ -740,6 +757,7 @@ class MainWindow(QMainWindow):
         self.bus.read_done.connect(self.reading_done)
         self.bus.account_done.connect(self.account_action_done)
         self.bus.style_done.connect(self.style_profile_done)
+        self.bus.wechat_action_done.connect(self.wechat_action_done)
         self._queue_action_slot = self._run_queue_action
         self.bus.queue_event.connect(self._queue_action_slot)
         # T3-UI: one global in-flight model request, latest-frame-only per scope.
@@ -847,7 +865,7 @@ class MainWindow(QMainWindow):
         self.summary.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         sum_layout.addWidget(self.summary)
         result_layout.addWidget(summary_group)
-        self.reply_boxes, self.copy_buttons = [], []
+        self.reply_boxes, self.copy_buttons, self.send_buttons = [], [], []
         for i in range(3):
             group = QGroupBox(f"回复建议 {i + 1}")
             box_layout = QVBoxLayout(group)
@@ -856,11 +874,18 @@ class MainWindow(QMainWindow):
             copy = QPushButton("复制")
             copy.setEnabled(False)
             copy.clicked.connect(lambda checked=False, n=i: self.copy_reply(n))
+            send = QPushButton("发送到微信")
+            send.setEnabled(False)
+            send.clicked.connect(lambda checked=False, n=i: self.send_reply_to_wechat(n))
+            buttons_row = QHBoxLayout()
+            buttons_row.addWidget(copy)
+            buttons_row.addWidget(send)
             box_layout.addWidget(text, 1)
-            box_layout.addWidget(copy, 0, Qt.AlignmentFlag.AlignRight)
+            box_layout.addLayout(buttons_row)
             result_layout.addWidget(group)
             self.reply_boxes.append(text)
             self.copy_buttons.append(copy)
+            self.send_buttons.append(send)
         result_layout.addStretch(1)
         chat_layout.addLayout(chat_body, 1)
         self.page_stack.addWidget(self.chat_page)
@@ -873,6 +898,8 @@ class MainWindow(QMainWindow):
         self.settings_page.account_action.connect(self._account_action_slot)
         self.settings_page.style_profile_button.clicked.connect(
             self.generate_style_profile)
+        self.settings_page.auto_find_button.clicked.connect(
+            self.find_wechat_conversation)
         self.settings_page.set_accounts(self.config.get("registrations") or [])
         self.refresh_effective_model()
         self.page_stack.addWidget(self.settings_page)
@@ -918,6 +945,8 @@ class MainWindow(QMainWindow):
         self.summary.setText("等待新对话快照")
         for text, button in zip(self.reply_boxes, self.copy_buttons):
             text.setText("等待分析")
+            button.setEnabled(False)
+        for button in getattr(self, "send_buttons", []):
             button.setEnabled(False)
 
     def set_editor(self, text):
@@ -1662,6 +1691,252 @@ class MainWindow(QMainWindow):
     def refresh_effective_model(self):
         self.effective_label.setText("分析：" + backends.describe_analysis(self.config))
 
+    # ---- WeChat auto actions (only on explicit user click; fail closed) -----
+    def _connected_hwnd(self):
+        item = self.window_item
+        try:
+            return int(item["hwnd"]) if item and item.get("hwnd") is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    def _prepare_wechat_for_action(self, hwnd):
+        """Restore a tray/minimized window for the action; True if it was hidden."""
+        try:
+            from . import discovery
+            if discovery.window_status(int(hwnd)) == "visible":
+                return False
+            path = self.config.get("wechat_path", "")
+            target = None
+            for candidate in discovery.find_wechat_windows(path, include_hidden=True):
+                if int(candidate["hwnd"]) == int(hwnd):
+                    target = candidate
+                    break
+            if target is not None:
+                discovery.restore_window(target, activate=True)
+            else:
+                import ctypes
+                ctypes.windll.user32.ShowWindow(int(hwnd), 4)
+            time.sleep(0.6)
+            return True
+        except (OSError, ValueError):
+            return False
+
+    def _finish_wechat_action(self, hwnd, was_hidden):
+        if not was_hidden:
+            return
+        try:
+            import ctypes
+            ctypes.windll.user32.ShowWindow(int(hwnd), 0)
+        except (OSError, ValueError):
+            pass
+
+    def _capture_client_frame(self, hwnd):
+        """In-memory client-area frame (BGR) for OCR; never written to disk."""
+        import ctypes
+        import ctypes.wintypes as wt
+        import numpy as np
+        from windows_capture import WindowsCapture
+
+        client = wt.RECT()
+        ctypes.windll.user32.GetClientRect(int(hwnd), ctypes.byref(client))
+        frames = []
+        capture = WindowsCapture(cursor_capture=None, draw_border=None,
+                                 window_hwnd=int(hwnd))
+
+        @capture.event
+        def on_frame_arrived(frame, control):
+            frames.append(np.array(frame.frame_buffer[:, :, :3], copy=True))
+            control.stop()
+
+        @capture.event
+        def on_closed():
+            pass
+
+        control = capture.start_free_threaded()
+        deadline = time.monotonic() + 5.0
+        while not frames and time.monotonic() < deadline:
+            time.sleep(0.05)
+        try:
+            control.stop()
+        except Exception:  # noqa: BLE001 - capture teardown must not mask result
+            pass
+        if not frames:
+            return None, client.right, client.bottom
+        image = frames[0][:, :, ::-1]
+        height = min(image.shape[0], client.bottom + 2)
+        width = min(image.shape[1], client.right + 2)
+        return image[:height, :width], client.right, client.bottom
+
+    @staticmethod
+    def _ocr_rows(image, reader, top=0):
+        result, _ = reader.ocr(image, use_cls=False)
+        rows = []
+        for box, text, _conf in sorted(result or [], key=lambda r: (r[0][0][1], r[0][0][0])):
+            xs = [point[0] for point in box]
+            ys = [point[1] for point in box]
+            rows.append((text, int(min(xs)), int(min(ys)) + top,
+                         int(max(xs)), int(max(ys)) + top))
+        return rows
+
+    def find_wechat_conversation(self):
+        target = self.settings_page.auto_target.text().strip()
+        if not target:
+            self.set_notice("请输入要查找的联系人名称。")
+            return
+        hwnd = self._connected_hwnd()
+        if hwnd is None:
+            self.set_notice("请先连接微信窗口，再使用自动查找。")
+            return
+        if self.wechat_busy:
+            return
+        self.wechat_busy = True
+        self.set_notice(f"正在查找微信对话：{target}…")
+
+        def work():
+            was_hidden = self._prepare_wechat_for_action(hwnd)
+            try:
+                from . import wechat_actions as wechat_actions
+                plan = wechat_actions.plan_for_window(hwnd)
+                verifier = wechat_actions.make_ocr_verifier(hwnd, None)
+                result = wechat_actions.select_conversation(
+                    hwnd, target, search_rect=plan["search_rect"],
+                    result_rect=plan["result_rect"], verify=verifier)
+                self.bus.wechat_action_done.emit("find", result, "")
+            except Exception as exc:  # noqa: BLE001 - UI thread reports the message
+                self.bus.wechat_action_done.emit(
+                    "find", None,
+                    str(exc) if isinstance(exc, ValueError) else "自动查找对话失败。")
+            finally:
+                self._finish_wechat_action(hwnd, was_hidden)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def send_reply_to_wechat(self, index):
+        if not self.settings_page.auto_send_allowed.isChecked():
+            self.set_notice("请先在设置中勾选“允许把建议发送到微信”。")
+            return
+        reply = self.reply_boxes[index].text().strip()
+        if (not reply or self.displayed_token is None
+                or not self.state.accepts(self.displayed_token)):
+            self.set_notice("没有可发送的有效建议，或对话已变化。")
+            return
+        if self.wechat_busy:
+            return
+        hwnd = self._connected_hwnd()
+        title = self.chat_title.text().strip()
+        if hwnd is None:
+            self.set_notice("请先连接微信窗口。")
+            return
+        if not title:
+            self.set_notice("会话标题未确认，暂不发送。")
+            return
+        answer = QMessageBox.question(
+            self, "确认发送", f"将把这条建议发送到微信当前会话？\n\n{title}\n\n{reply}",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No)
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self.wechat_busy = True
+        self.set_notice("正在发送建议到微信…")
+
+        def work():
+            was_hidden = self._prepare_wechat_for_action(hwnd)
+            try:
+                from . import wechat_actions as wechat_actions
+                from vendor.ocr import Reader
+                plan = wechat_actions.plan_for_window(hwnd)
+                verifier = wechat_actions.make_ocr_verifier(hwnd, None)
+                current = verifier()
+                if not current or title not in current:
+                    raise ValueError("当前会话标题与目标不一致，已取消发送。")
+                image, _cw, ch = self._capture_client_frame(hwnd)
+                if image is None:
+                    raise ValueError("无法获取微信画面，已取消发送。")
+                reader = Reader()
+                rows = self._ocr_rows(image[int(ch * 0.72):, :], reader,
+                                      top=int(ch * 0.72))
+                send_rows = [row for row in rows if "发送" in row[0]]
+                if not send_rows:
+                    raise ValueError("未找到发送按钮，已取消发送。")
+                _text, sx0, sy0, sx1, sy1 = send_rows[0]
+                dpi_value = int(wechat_actions.Win32Backend().dpi(hwnd) or 96)
+                scale = dpi_value / 96.0
+                send_center_x = ((sx0 + sx1) / 2) / scale
+                send_center_y = ((sy0 + sy1) / 2) / scale
+                input_x = send_center_x - 260 / scale
+                input_y = send_center_y - 1 / scale
+                input_rect = (int(input_x - 30), int(input_y - 12),
+                              int(input_x + 30), int(input_y + 12))
+                send_rect = (int(sx0 / scale), int(sy0 / scale),
+                             int(sx1 / scale), int(sy1 / scale))
+                marker = reply[:6]
+
+                def verify_sent(_text):
+                    try:
+                        frame2, _w, _h = self._capture_client_frame(hwnd)
+                        if frame2 is None:
+                            return False
+                        local_reader = Reader()
+                        input_rows = self._ocr_rows(frame2[int(ch * 0.80):, :],
+                                                    local_reader)
+                        body_rows = self._ocr_rows(
+                            frame2[int(ch * 0.10):int(ch * 0.78), :], local_reader)
+                        return (any(marker in row[0] for row in body_rows)
+                                and not any(marker in row[0] for row in input_rows))
+                    except Exception:  # noqa: BLE001 - verification must not raise
+                        return False
+
+                result = wechat_actions.send_message(
+                    hwnd, reply, input_rect=input_rect, send_rect=send_rect,
+                    verify_sent=verify_sent)
+                self.bus.wechat_action_done.emit("send", result, "")
+            except Exception as exc:  # noqa: BLE001 - UI thread reports the message
+                self.bus.wechat_action_done.emit(
+                    "send", None,
+                    str(exc) if isinstance(exc, (ValueError, OSError))
+                    else "自动发送失败。")
+            finally:
+                self._finish_wechat_action(hwnd, was_hidden)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def wechat_action_done(self, action, result, error):
+        self.wechat_busy = False
+        if error:
+            self.set_notice(error)
+            return
+        if result is None:
+            self.set_notice("自动操作未返回结果。")
+            return
+        if action == "find":
+            if getattr(result, "ok", False):
+                self.set_notice("已切换到目标对话；请核对内容后再点击“发送到微信”。")
+            else:
+                self.set_notice(self._wechat_reason_text(result, "查找对话失败"))
+        elif action == "send":
+            if getattr(result, "sent", False) and getattr(result, "verified", False):
+                self.set_notice("建议已发送并通过双条件验证（输入框清空 + 气泡出现）。")
+            elif getattr(result, "sent", False):
+                self.set_notice("消息可能已发送，但自动验证失败，请到微信人工确认。")
+            else:
+                self.set_notice(self._wechat_reason_text(result, "发送失败"))
+
+    @staticmethod
+    def _wechat_reason_text(result, fallback):
+        reason = str(getattr(result, "reason", "") or "")
+        mapping = {
+            "activate_failed": "微信窗口无法激活（可能被其他程序占用前台）。",
+            "title_mismatch": "当前会话与目标不一致，已拒绝操作。",
+            "title_unverified": "无法确认当前会话标题，已拒绝操作。",
+            "send_verify_failed": "消息可能已发送但验证失败，请人工确认。",
+            "input_failed": "输入框未获得焦点，未发送。",
+            "invalid_window": "微信窗口句柄无效，请重新连接。",
+            "timeout": "操作超时，请重试。",
+        }
+        if reason in mapping:
+            return mapping[reason]
+        return fallback + (f"（{reason}）" if reason else "")
+
     def generate_style_profile(self):
         if self.style_busy:
             return
@@ -2091,6 +2366,8 @@ class MainWindow(QMainWindow):
         for text, copy, reply in zip(self.reply_boxes, self.copy_buttons, result["replies"]):
             text.setText(reply)
             copy.setEnabled(True)
+        for button in getattr(self, "send_buttons", []):
+            button.setEnabled(True)
         self.displayed_token = token
         self.analysis_status.setText("已生成 3 条建议")
         self.ai_toggle.setToolTip("有新的 AI 建议，点击展开")
