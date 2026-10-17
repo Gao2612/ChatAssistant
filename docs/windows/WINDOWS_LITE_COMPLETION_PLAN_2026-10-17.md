@@ -264,6 +264,8 @@ CaptureScheduler.activate(source: SourceKey) -> None
 
 ## T11：构建追溯与安装生命周期
 
+> 2026-10-18 部分完成：构建清单/源码摘要/`verify_build_info`、隔离 `--self-test`、`verify_install.ps1`、`--version-json`/`--lite-pdf-worker` 分发已落码并提交（`11ba51f`、`617a89f`）；`package.ps1` 已改 PS5.1 兼容。**待 T7–T11 合并后重建候选包并做隔离安装/升级/卸载验证；干净 VM 全流程仍属 T12。**
+
 **Files:** 新建 `tools/write_build_info.py`、`tools/verify_build_info.py`、`tools/verify_install.ps1`、`liteapp/self_test.py`；改 `build.ps1`、`package.ps1`、`main.py`、`installer/ChatAssistantLite.iss`；新增 `tests/test_build_info.py`。
 
 **Interfaces:** `--version-json` 输出版本与源码摘要，`--self-test --data-dir <isolated>` 使用指定隔离目录执行资源/数据库/合成 OCR 检查，不枚举微信、不访问正式授权。

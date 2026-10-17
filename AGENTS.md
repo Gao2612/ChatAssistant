@@ -13,7 +13,7 @@
 
 任何涉及 Windows、微信嵌入、多开、实时回复、ExportWeChat HTML、客户画像、关系趋势、聊天统计、exe 安装包、读取/分析后端选择的任务，应先阅读完整版设计、分任务实施计划、0.2 本机验证与 2026-10-18 验收清单。设计中的待实施能力不得写成已交付。
 
-2026-10-18 状态：T0a/T0b（点1/点4）已落码；T1–T6 全部完成并分阶段提交（T1 契约/单实例、T2 账号服务、T3 推理层/队列、T4 窗口管理/恢复、T5 历史 V2、T6 导入器）；T11 构建追溯工具已提交（main.py 接线待做）；T12 验收矩阵已建。Lead 进行 T2-UI/T3-UI/T4-UI 集成与 T7–T12。真实进度以 [WINDOWS_LITE_IMPLEMENTATION_PROGRESS.md](docs/windows/WINDOWS_LITE_IMPLEMENTATION_PROGRESS.md) 为准。
+2026-10-18 状态：T0a/T0b（点1/点4）已落码；T1–T6 全部完成并分阶段提交（T1 契约/单实例、T2 账号服务、T3 推理层/队列、T4 窗口管理/恢复、T5 历史 V2、T6 导入器）；T11 构建工具与 main 入口分发已提交（`11ba51f`、`617a89f`）；T12 验收矩阵已建。Lead 进行 T2-UI/T3-UI/T4-UI 集成与 T9/T10，队友进行 T7/T8/独立审查。真实进度以 [WINDOWS_LITE_IMPLEMENTATION_PROGRESS.md](docs/windows/WINDOWS_LITE_IMPLEMENTATION_PROGRESS.md) 为准。
 
 ## 工作边界
 - `windows/lite/` 已有 Windows 0.2 本地实现和测试安装包；旧临时 `SetParent` 探针发现单击/滚动故障。新版顶层窗口停靠已验证鼠标命中、画面和 OCR，但单击/滚动、输入法、扫码及弹窗尚未逐项验收，不得写成完整兼容。
