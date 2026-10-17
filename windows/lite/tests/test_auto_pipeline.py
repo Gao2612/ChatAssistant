@@ -26,6 +26,37 @@ class FrameClock(list):
     def get_lock(self): return nullcontext()
 
 
+class QueueHandle:
+    def __init__(self, request):
+        self.request = request
+        self.callback = None
+        self.cancelled = False
+        self.error = None
+        self.result = None
+
+    def set_callback(self, callback):
+        self.callback = callback
+
+    def cancel(self):
+        self.cancelled = True
+
+
+class QueueStub:
+    def __init__(self):
+        self.requests = []
+
+    def submit(self, request, scope_id=None):
+        handle = QueueHandle(request)
+        self.requests.append(handle)
+        return handle
+
+    def stop(self):
+        pass
+
+    def resume(self):
+        pass
+
+
 class AutoPipelineTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -56,12 +87,18 @@ class AutoPipelineTests(unittest.TestCase):
         self.app.processEvents()
 
     def test_confirmed_text_automatically_produces_suggestions(self):
-        with patch('liteapp.ui.analyze', return_value=RESULT):
-            self.window.tick()
-            deadline = time.monotonic() + 2
-            while self.window.busy and time.monotonic() < deadline:
-                self.app.processEvents()
-                time.sleep(.01)
+        from liteapp.inference_schemas import InferenceResult
+        self.window.inference_queue = QueueStub()
+        self.window.tick()
+        deadline = time.monotonic() + 2
+        while not self.window.inference_queue.requests and time.monotonic() < deadline:
+            self.app.processEvents()
+            time.sleep(.01)
+        self.assertEqual(len(self.window.inference_queue.requests), 1)
+        handle = self.window.inference_queue.requests[0]
+        handle.result = InferenceResult(validated_data=dict(RESULT),
+                                        request_id="req", elapsed=0.1)
+        handle.callback(handle)
         self.assertEqual(self.window.displayed_token, self.token)
         self.assertTrue(self.window.copy_buttons[0].isEnabled())
 
