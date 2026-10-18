@@ -55,3 +55,11 @@
 - 本报告只汇总现状，不代表全部未验收项已修复；未验收项已明确标注。
 - 代码改动均保留在工作区（未 commit、未 push），安装包由 20:42 构建的 0.5.21 产物生成。
 - 自动互审/执行器只在本机 127.0.0.1 运行，不读取聊天文本、不截图会话、不发送微信消息。
+
+## 6. GitHub 备份（2026-10-18 21:02）
+
+- 仓库：https://github.com/Gao2612/ChatAssistant
+- 分支：`feat/windows-lite`（已设置 upstream）
+- 备份提交：`c02ac4b`（wip(backup): 0.5.21 C1/C13/C8-FIX, UI redesign assets, feature report）
+- PR 入口：https://github.com/Gao2612/ChatAssistant/pull/new/feat/windows-lite
+- 说明：本次备份包含 0.5.21 应用代码、UI 资源（`windows/lite/assets/`）、C1/C13/C8-FIX 改动与本报告；仅备份用途，未经 Codex 验收的改动已在第 3 节标注。
