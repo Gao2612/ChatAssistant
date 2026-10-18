@@ -459,13 +459,25 @@ class HistoryStore:
             if retry:
                 return self._retry_import(db, scope, source, materialized)
             duplicate = db.execute(
-                "SELECT id FROM sources WHERE person_id=? AND digest=?",
-                (scope.person_id, source.digest)).fetchone()
+                "SELECT id, kind, parser_version FROM sources "
+                "WHERE account_id=? AND person_id=? AND digest=?",
+                (scope.wechat_account_id, scope.person_id,
+                 source.digest)).fetchone()
+            duplicate_id = None
             if duplicate is not None:
-                return self._source_result(db, scope, duplicate[0], duplicate=True)
-
+                existing_id, existing_kind, existing_parser = duplicate
+                same_parser = (source.kind == existing_kind
+                               and source.parser_version == existing_parser)
+                if same_parser and source.source_id in (None, existing_id):
+                    return self._source_result(
+                        db, scope, existing_id, duplicate=True)
+                # Same file bytes but a different parser identity: a parser fix
+                # (e.g. a companion JSON fallback for a truncated HTML export)
+                # must be allowed to replace the previously partial source in
+                # place instead of being skipped as an idempotent duplicate.
+                duplicate_id = existing_id
             revision = None
-            if source.source_id is not None:
+            if source.source_id is not None and source.source_id != duplicate_id:
                 revision = db.execute(
                     "SELECT account_id, person_id FROM sources WHERE id=?",
                     (source.source_id,)).fetchone()
@@ -474,12 +486,16 @@ class HistoryStore:
                         or revision[1] != scope.person_id):
                     raise ScopeMismatchError(
                         "跨账号导入被拒绝：来源不属于当前微信账号与联系人。")
-            source_id = source.source_id or uuid.uuid4().hex
+            replace_existing = (
+                revision is not None
+                or (duplicate_id is not None
+                    and source.source_id in (None, duplicate_id)))
+            source_id = source.source_id or duplicate_id or uuid.uuid4().hex
             char_count = sum(len(item.text) for item in materialized)
             failure_count = len(source.page_issues)
             page_issues_blob = self._seal(encode_page_issues(source.page_issues))
             try:
-                if revision is not None:
+                if replace_existing:
                     db.execute("DELETE FROM records WHERE source_id=?", (source_id,))
                     db.execute(
                         "UPDATE sources SET digest=?, kind=?, parser_version=?, "

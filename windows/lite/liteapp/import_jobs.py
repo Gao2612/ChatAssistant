@@ -298,6 +298,13 @@ class ImportJobs:
                    pages_done=max(pages_done, parser.pages_done),
                    page_issues=tuple(parser.page_issues))
         source = ImportSource(digest=digest, kind=match.kind, name=path.name,
+                              # Persist the parser identity, not just the shared
+                              # format version: if probe selects a fixed parser
+                              # (e.g. companion JSON instead of a truncated HTML
+                              # body) for the same bytes, the store may replace a
+                              # previously partial source instead of skipping it
+                              # as an idempotent duplicate.
+                              parser_version=match.parser_name or "unknown",
                               page_count=parser.page_count,
                               page_issues=tuple(parser.page_issues),
                               source_id=job.retry_source_id)

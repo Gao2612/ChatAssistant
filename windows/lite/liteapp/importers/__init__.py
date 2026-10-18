@@ -1,8 +1,11 @@
 """Import parser registry (T6).
 
 ``probe`` is cheap and read-only; unknown formats return ``None`` and are never
-parsed by guesswork. ExportWeChat candidates stay on the generic safe parser until
-a real sample is calibrated (see :mod:`liteapp.importers.exportwechat_html`).
+parsed by guesswork. ExportWeChat candidates with a calibrated companion JSON
+(``<name>.html.json``) get the exact parser (see
+:mod:`liteapp.importers.exportwechat_json`); HTML-only ExportWeChat exports have
+no calibrated DOM and stay on the generic safe parser (see
+:mod:`liteapp.importers.exportwechat_html`).
 """
 
 from __future__ import annotations
@@ -12,7 +15,7 @@ from pathlib import Path
 from typing import Callable
 
 from ..history_models import HistoryImportError
-from . import exportwechat_html, html_generic, pdf
+from . import exportwechat_html, exportwechat_json, html_generic, pdf
 from .base import (
     HTML_PARSE_TIMEOUT_SECONDS,
     MAX_IMPORT_FILE_BYTES,
@@ -41,8 +44,12 @@ __all__ = [
 ]
 
 # Order matters: signature-based adapters first, then container formats, then the
-# generic HTML fallback. Each probe validates size itself (fail closed).
-_PROBES = (exportwechat_html.probe, pdf.probe, html_generic.probe)
+# generic HTML fallback. ``exportwechat_html.probe`` delegates to the calibrated
+# companion-JSON probe, so ``<name>.html`` + ``<name>.html.json`` resolves to the
+# exact ExportWeChat parser before ``html_generic`` can claim the same HTML.
+# Each probe validates size itself (fail closed).
+_PROBES = (exportwechat_html.probe, exportwechat_json.probe, pdf.probe,
+           html_generic.probe)
 
 
 def supported_extensions() -> tuple[str, ...]:
@@ -78,6 +85,8 @@ def create_parser(match: FormatMatch, *, clock: Callable[[], float] | None = Non
                               worker_command=worker_command,
                               python_executable=python_executable)
     elif issubclass(parser_class, html_generic.HtmlGenericParser):
+        parser = parser_class(clock=clock, parse_timeout=html_timeout)
+    elif issubclass(parser_class, exportwechat_json.ExportWeChatJSONParser):
         parser = parser_class(clock=clock, parse_timeout=html_timeout)
     else:  # test doubles only need the clock
         try:

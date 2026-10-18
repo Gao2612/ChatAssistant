@@ -72,6 +72,49 @@ class HistoryStoreTests(unittest.TestCase):
         self.assertNotIn("现货", self.db.read_bytes().decode("utf-8", errors="ignore"))
         self.assertEqual(self.store.stats(self.scope).source_count, 1)
 
+    def test_same_digest_with_new_parser_identity_replaces_partial_source(self):
+        """A parser fix (same file bytes) replaces the partial source in place."""
+        from liteapp.history_models import ImportSource, ImportedRecord
+
+        source = ImportSource(digest="a" * 64, kind="html", name="田子夜.html",
+                              parser_version="old_truncated_html")
+        first = self.store.import_records(self.scope, source, [
+            ImportedRecord(text="残缺占位一", ordinal=0, record_type="message",
+                           sender="客户"),
+        ])
+        self.assertFalse(first.duplicate)
+        old_source_version = self.store.stats(self.scope).source_version
+        self.assertEqual(self.store.stats(self.scope).record_count, 1)
+
+        fixed_source = ImportSource(digest="a" * 64, kind="html", name="田子夜.html",
+                                    parser_version="exportwechat_json")
+        fixed_records = [
+            ImportedRecord(text=f"完整消息 {index}", ordinal=index,
+                           record_type="message", sender="客户",
+                           sent_at=f"2026-01-0{index % 9 + 1} 10:00")
+            for index in range(1854)
+        ]
+        fixed = self.store.import_records(self.scope, fixed_source, fixed_records)
+        self.assertFalse(fixed.duplicate)
+        self.assertEqual(fixed.source_id, first.source_id)
+        self.assertEqual(fixed.record_count, 1854)
+        stats = self.store.stats(self.scope)
+        self.assertEqual(stats.source_count, 1)
+        self.assertEqual(stats.record_count, 1854)
+        self.assertGreater(stats.source_version, old_source_version)
+        rows = list(self.store.iter_records(self.scope, stats.source_version))
+        self.assertEqual(len(rows), 1854)
+        self.assertEqual(rows[0].text, "完整消息 0")
+        self.assertEqual(rows[-1].text, "完整消息 1853")
+        self.assertEqual(rows[0].sent_at, "2026-01-01 10:00")
+        self.assertEqual(self.store.list_sources(self.scope)[0].parser_version,
+                         "exportwechat_json")
+
+        # Re-running the same fixed parser remains idempotent.
+        again = self.store.import_records(self.scope, fixed_source, fixed_records)
+        self.assertTrue(again.duplicate)
+        self.assertEqual(self.store.stats(self.scope).record_count, 1854)
+
     def test_person_and_account_isolation_search_and_delete(self):
         html = self.folder / "sample.html"
         html.write_text("<div>只属于甲：交付日期星期五</div>", encoding="utf-8")

@@ -45,6 +45,8 @@ from liteapp.importers.exportwechat_html import (
     SAMPLE_VERIFIED,
     SIGNATURE_MARKERS,
 )
+from liteapp.importers import exportwechat_html
+from liteapp.importers.exportwechat_json import ExportWeChatJSONParser
 from liteapp.importers.html_generic import HtmlGenericParser
 from liteapp.importers import pdf as pdf_module
 from liteapp.importers.pdf import (
@@ -313,16 +315,36 @@ class HtmlGenericParserTests(ImportTestCase):
 
 
 class ExportWeChatTests(ImportTestCase):
-    def test_signature_candidate_never_claims_exact_support_without_sample(self):
+    def test_exportwechat_exact_only_with_companion_json_and_fallback_without(self):
+        # 对照一：HTML-only（无伴生 *.html.json）——真实样本已证明 HTML 只是渲染壳，
+        # DOM 尚未校准，所以必须继续通用回退、不得声称精确支持。
         match = probe(EXPORTWECHAT_HTML)
         self.assertIsNotNone(match)
         self.assertEqual(match.kind, "exportwechat_html")
-        self.assertFalse(match.exact_support, "没有真实样本时不得标记精确支持")
+        self.assertFalse(match.exact_support, "HTML-only 没有真实样本校准，不得标记精确支持")
         self.assertNotEqual(match.support_level, "exact")
         self.assertEqual(match.parser_name, "html_generic", "应继续通用安全回退")
         self.assertIn("样本", " ".join(match.notes))
-        self.assertFalse(SAMPLE_VERIFIED)
-        # 显式签名字段可被识别（用于将来锁定真实格式），但当前解析器仍是通用回退。
+        # SAMPLE_VERIFIED 只对伴生 JSON 通道为 True（HTML-only 仍未校准）。
+        self.assertTrue(SAMPLE_VERIFIED)
+        self.assertEqual(exportwechat_html.SAMPLE_VERIFIED, True)
+
+        # 对照二：同一 HTML 一旦有伴生 JSON，就切到已校准的精确解析器。
+        with tempfile.TemporaryDirectory() as folder:
+            html_path = Path(folder) / "pair.html"
+            html_path.write_bytes(EXPORTWECHAT_HTML.read_bytes())
+            (Path(folder) / "pair.html.json").write_text(json.dumps([{
+                "StrTime": "2026-01-02 10:00:00", "display_name": "合成联系人",
+                "is_send": False, "sender": "wxid_peer_synthetic",
+                "text": "合成伴生 JSON 正文", "timestamp": 1767386400,
+                "type": "1", "xml_dict": {}}], ensure_ascii=False), encoding="utf-8")
+            exact = probe(html_path)
+            self.assertIs(exact.parser, ExportWeChatJSONParser)
+            self.assertTrue(exact.exact_support)
+            self.assertEqual(exact.parser_name, "exportwechat_json")
+            self.assertEqual(exact.support_level, "exact")
+
+        # 显式签名字段可被识别（用于锁定真实格式），但 HTML-only 解析器仍是通用回退。
         self.assertTrue(any(marker.lower() in EXPORTWECHAT_HTML.read_bytes().lower()
                             for marker in SIGNATURE_MARKERS))
         self.assertTrue(issubclass(ExportWeChatHTMLParser, HtmlGenericParser))
@@ -340,6 +362,7 @@ class ExportWeChatTests(ImportTestCase):
         parser = create_parser(match)
         self.assertIsInstance(parser, HtmlGenericParser)
         self.assertNotIsInstance(parser, ExportWeChatHTMLParser)
+        # HTML DOM 仍未校准：即使 SAMPLE_VERIFIED 为 True 也不能冒充精确解析。
         with self.assertRaises(HistoryImportError):
             list(ExportWeChatHTMLParser().parse(EXPORTWECHAT_HTML, CancellationToken()))
 
