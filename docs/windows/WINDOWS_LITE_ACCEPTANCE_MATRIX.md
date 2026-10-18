@@ -179,3 +179,13 @@
 - Git `13c7ff3`（clean）、147 个源文件；`--version-json` 0.5.9；隔离 `--self-test` exit 0；`--smoke` exit 0；`package.ps1 -VerifyInstall` ok=true；已覆盖安装到 `E:\ChatAssistantLite`；桌面/开始菜单快捷方式由安装器重建
 - 包含 DeepSeek 临时接管的 C1（安全 UI find 路径/H3/H4/P2-10）、C2（隔离升级验证工具）、C3（真实窗口验收工具）、C4（屏幕抓取+exact+foreground 守卫）、C5（合成验收）以及 Codex 0.5.8 基线
 - 全量：**750 tests OK / 37 skipped / exit 0**（提交前）；完整 clean-VM/真实模型/A4 发送/双微信仍待用户/Codex
+### 候选包 0.5.12（悬浮窗 + 布局/托盘修复，2026-10-18）
+
+- 版本 0.5.12；安装包 SHA-256 `4C63636F1130AB128CE5DA15010C39BADCBA106125EB35A2285B8C35E724A7BB`
+- Git `a571d17`（clean，149 源文件）；version-json/自检/smoke/隔离安装全通过；已覆盖安装到 `E:\ChatAssistantLite`
+- **悬浮窗模式**：主界面“悬浮窗”按钮 → 置顶无边框小窗（状态/会话名/分析状态/“分析当前对话”/“主界面”），主窗隐藏后采集与分析继续；完整功能仍在主界面
+- **布局**：预览默认“适应区域”并居中，100%/150%/200% 也居中；AI 建议面板切换不再扩大窗口，最大化时仍在窗内显示
+- **托盘隐藏读取**：修复 tray_capture 64 位 GDI 类型声明与 cloaked/offscreen 判定；minimized 隐藏抓帧实测返回 438×451，不再误报“暂时无法读取画面”
+- **模型**：真实 profile 的 `DeepSeek-V4.1-Flash`（显示名，HTTP 400）规范为可调用 id `deepseek-flash`；合成文本真实回合返回 3 条建议
+- 全量 **753 tests OK / 37 skipped / exit 0**
+- 14:51 后 Codex 任务：C6 悬浮窗真实化/不确定行为、C7 托盘隐藏读取可靠性、C8 布局与旧模型显示名迁移验证
