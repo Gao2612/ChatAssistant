@@ -1149,7 +1149,7 @@ class MainWindow(QMainWindow):
         self.preview_zoom = NoWheelComboBox()
         for display, value in (('适应区域', 0), ('原始大小（100%）', 1), ('放大 150%', 1.5), ('放大 200%', 2)):
             self.preview_zoom.addItem(display, value)
-        self.preview_zoom.setCurrentIndex(1)
+        self.preview_zoom.setCurrentIndex(0)  # 适应区域：默认整幅可见、居中，不留单侧空白
         self.preview_zoom.setAccessibleName('聊天画面缩放')
         self.preview_zoom.currentIndexChanged.connect(self.render_preview)
         preview_header.addWidget(self.preview_zoom)
@@ -1316,6 +1316,7 @@ class MainWindow(QMainWindow):
             rendered = pixmap.scaled(target, Qt.AspectRatioMode.KeepAspectRatio,
                                      Qt.TransformationMode.SmoothTransformation)
             self.preview_scroll.setWidgetResizable(False)
+            self.preview_scroll.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.preview.setFixedSize(rendered.width() + 6, rendered.height() + 6)
         else:
             self.preview.setMinimumSize(0, 200)
@@ -1580,18 +1581,12 @@ class MainWindow(QMainWindow):
         if self.page_stack.currentWidget() is not self.chat_page:
             self.show_chat()
         visible = self.ai_panel.isHidden()
-        extension = self.ai_panel.width()
-        if visible:
-            self.resize(self.width() + extension, self.height())
-            screen = self.screen()
-            if screen is not None:
-                area = screen.availableGeometry()
-                if self.geometry().right() > area.right():
-                    self.move(max(area.left(), area.right() - self.width() + 1), self.y())
+        # Never resize the window to make room: at maximized/screen width that
+        # pushed the panel outside the screen, so the suggestions "disappeared".
+        # Let the horizontal layout shrink the chat area instead.
         self.ai_panel.setVisible(visible)
-        if not visible:
-            self.resize(max(self.minimumWidth(), self.width() - extension), self.height())
         self.ai_toggle.setChecked(visible)
+        self.ai_toggle.setToolTip("收起 AI 建议" if visible else "展开 AI 建议")
 
     def set_connection_status(self, text):
         self.connection_status.setText(text)

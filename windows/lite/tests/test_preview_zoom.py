@@ -2,7 +2,7 @@ import os
 import unittest
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
-from PySide6.QtCore import QBuffer, QIODevice
+from PySide6.QtCore import QBuffer, QIODevice, Qt
 from PySide6.QtGui import QImage, QColor
 from PySide6.QtWidgets import QApplication
 from liteapp.ui import MainWindow
@@ -30,9 +30,21 @@ class PreviewZoomTests(unittest.TestCase):
         image.save(data,'PNG')
         window.show_preview(bytes(data.data()))
         self.app.processEvents()
-        self.assertEqual(window.preview.pixmap().width(),1000)
-        self.assertGreater(window.preview_scroll.verticalScrollBar().maximum(),0)
+        # Default is fit: the whole frame is visible and centred, never left-aligned
+        # with a blank stripe on the right.
+        self.assertEqual(window.preview_zoom.currentData(), 0)
+        self.assertLessEqual(window.preview.pixmap().width(),
+                             window.preview_scroll.viewport().width())
+        self.assertLessEqual(window.preview.pixmap().height(),
+                             window.preview_scroll.viewport().height())
+        window.preview_zoom.setCurrentIndex(window.preview_zoom.findData(1))
+        self.app.processEvents()
+        self.assertEqual(window.preview.pixmap().width(), 1000)
+        self.assertGreater(window.preview_scroll.verticalScrollBar().maximum(), 0)
+        self.assertEqual(window.preview_scroll.alignment(),
+                         Qt.AlignmentFlag.AlignCenter)
         window.preview_zoom.setCurrentIndex(window.preview_zoom.findData(0))
         self.app.processEvents()
-        self.assertLessEqual(window.preview.pixmap().height(),window.preview_scroll.viewport().height())
-        self.assertEqual(manager.named('attach'),[])
+        self.assertLessEqual(window.preview.pixmap().height(),
+                             window.preview_scroll.viewport().height())
+        self.assertEqual(manager.named('attach'), [])
