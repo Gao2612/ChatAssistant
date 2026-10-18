@@ -4,6 +4,8 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import Qt
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from liteapp.ui import MainWindow
@@ -52,6 +54,17 @@ class FloatingAssistantTests(unittest.TestCase):
         self.assertTrue(self.window.ai_toggle.isHidden())
         self.assertIs(self.window.page_stack.currentWidget(),
                       self.window.settings_page)
+
+    def test_ball_click_expands_and_collapses(self):
+        self.window.enter_ball_mode()
+        self.app.processEvents()
+        floating = self.window.floating
+        self.assertFalse(floating._expanded)
+        QTest.mouseClick(floating, Qt.MouseButton.LeftButton,
+                         pos=floating.rect().center())
+        self.app.processEvents()
+        self.assertTrue(floating._expanded)
+        self.assertGreater(floating.width(), 200)
 
     def test_expand_shows_suggestions_and_analyze_calls_host(self):
         self.window.enter_ball_mode()

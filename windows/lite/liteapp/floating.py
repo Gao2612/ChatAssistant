@@ -114,6 +114,9 @@ class FloatingAssistant(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
         self.ball = BallFace()
+        # Let the top-level window receive drag/click: the painted face is a child
+        # widget and must not swallow mouse events.
+        self.ball.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         root.addWidget(self.ball)
 
         self.panel = QFrame()

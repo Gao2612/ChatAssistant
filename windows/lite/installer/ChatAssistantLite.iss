@@ -1,5 +1,5 @@
 #define AppName "ChatAssistant Lite"
-#define AppVersion "0.5.19"
+#define AppVersion "0.5.20"
 #define AppExeName "ChatAssistantLite.exe"
 
 [Languages]
