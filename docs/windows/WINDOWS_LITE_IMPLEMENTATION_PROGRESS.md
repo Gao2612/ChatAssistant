@@ -216,3 +216,12 @@
 - **悬浮球**：1) 透明窗口 + 圆角面板，去掉方形黑边；2) 回复 `设置/−/×` 三个明确按钮，去掉 ⋯ 菜单；3) 好感度卡改 60px 环形 + 六维圆点；4) 空状态/建议切换用 QStackedWidget，高度按内容收拢；5) Esc 收起、展开态空白点击不再误收起、拖动阈值；6) 各按钮 ID 级 focus/disabled 样式；7) 档案字段列表渲染去掉 repr。
 - 图标：exe/快捷方式/任务栏统一新图标，设置 AppUserModelID；删除桌面旧 0.5.21 安装包。
 - 全量 910 tests OK/42 skipped；0.5.27 已安装（SHA `ED447CF1…73E5B96C`）。
+### 0.5.28（2026-10-19 00:05）：ExportWeChat 完整历史导入
+
+- 用户报 `田子夜.html` 只识别到几条。复现：`store.import_file` 只得 13 条/57 字，内容多为“上一页/模板错误”等壳文本。
+- 根因：该版本 ExportWeChat 把 1854 条完整记录写在伴生 `田子夜.html.json`（670KB），HTML 内 `#chat-container` 仅 5 条占位，正文由 JS 加载；旧解析只处理 HTML 且跳过 `<script>`。
+- 新增 `importers/exportwechat_json.py`：probe 校验伴生 JSON 签名（顶层数组、含 StrTime/type/is_send），`ExportWeChatJSONParser` 输出带 sender/sent_at/locator 的 message；文本类（1/引用/撤回/红包/链接/位置/通话）取对应字段，图片与表情只计数不产空记录；自动反转义实体、唯一 ordinal、限制与取消沿用 base 常量。
+- `exportwechat_html.probe` 先委托 JSON 探测；`SAMPLE_VERIFIED=True` 仅标注 JSON 通道，HTML-only 仍 generic fallback 且专用 HTML parser 继续拒绝冒充精确支持。
+- `import_jobs` 将 `match.parser_name` 写入 `ImportSource.parser_version`；`history.import_records` 在 digest 相同但 parser 身份不同时原地替换来源（同 source_id、import_version+1、派生物失效），支持“残缺 13 条 → 完整 1684 条”补齐。
+- 真实样本 e2e：1684 条/16912 字，`我`888/对方 796，时间跨度 2026-08-31 10:12:33 → 2026-10-18 09:40:48，重导 duplicate=True；跳过图片 110/表情 60。
+- 全量 933 tests OK/42 skipped；0.5.28 已安装（SHA `08A0400C…D474D12`）。

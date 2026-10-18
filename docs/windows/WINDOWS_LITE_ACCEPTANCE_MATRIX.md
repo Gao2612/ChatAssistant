@@ -240,3 +240,12 @@
 - 面板字段去掉 `['...']` repr（列表渲染为顿号分隔）
 - 桌面旧 `ChatAssistantLite-Setup-0.5.21.exe` 已删除；exe/快捷方式/任务栏图标均为新图标（并设置 AppUserModelID）
 - 全量 **910 tests OK / 42 skipped**
+### 候选包 0.5.28（ExportWeChat 伴生 JSON 完整导入，2026-10-18）
+
+- 版本 0.5.28；安装包 SHA-256 `08A0400C25BB38EB07A287EB57758570E4FE4A3AAEC5D3F4CD3A13DADD474D12`
+- Git `a7d3256`；168 源文件；version-json/隔离 self-test 通过；已覆盖安装
+- **根因**：真实 ExportWeChat 导出把完整记录放在同目录 `<name>.html.json`，HTML 只是渲染壳（5 条占位 + “模板错误”）；旧解析只读 HTML 且跳过 script，仅得 13 条 UI 文本
+- **修复**：新增 `importers/exportwechat_json.py`（probe 命中伴生 JSON 签名 → `parser_name=exportwechat_json`、`support_level=exact`）；`exportwechat_html.probe` 先委托 JSON 探测；`SAMPLE_VERIFIED=True` 仅限 JSON 通道，HTML-only 仍走 generic fallback
+- **补齐旧残缺数据**：`import_jobs` 把 parser_name 写入来源身份；`history` 对“同 digest、不同 parser”的重复导入原地替换来源（同 source_id、版本递增、派生物失效），不新增重复来源
+- 真实样本端到端：**1684 条 / 16912 字**（原 13 条），sender/sent_at 完整，时间跨度 2026-08-31→2026-10-18，重导幂等；跳过图片 110 + 表情 60 并计数
+- 全量 **933 tests OK / 42 skipped**
