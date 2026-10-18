@@ -107,3 +107,17 @@ Codex 已在 `AGENTS.md` 的「Codex 分派任务」节获得指引；看板地�
 运行名单、分工、写作用域与交还协议见 [CODEX_TAKEOVER_2026-10-18.md](CODEX_TAKEOVER_2026-10-18.md)。
 本地看板对应 `TAKE-C1…TAKE-C5`（source=deepseek，进行中）；C1–C5 原任务仍留给 Codex，
 14:51 后 Codex 先看接管证据，只复核/补漏，不重复实现。
+---
+
+## G. Codex 额度空窗期临时接管结果（2026-10-18）
+
+DeepSeek 多智能体在 14:51 前接管 C1–C5，结果索引见
+[CODEX_TAKEOVER_RESULT_2026-10-18.md](CODEX_TAKEOVER_RESULT_2026-10-18.md)：
+
+- C1 ✅完成（带限定：UIA 等价按钮槽真实成功；native 鼠标/A-B 未完成）
+- C2 ✅完成（隔离 0.4.3→0.5.8 生命周期；真实候选包/干净 VM 待复跑）
+- C3 ◐部分完成（dock/minimize/tray 自动通过；真实弹窗/托盘按钮/视觉人工；F1 提示文案、F3 托盘竞争为产品建议）
+- C4 ✅完成（真实郜亚禹/田子夜 ok，无 Enter/发送）
+- C5 ✅完成（合成 T9/T10；真实模型/双账号待用户）
+
+仍待用户/Codex：真实模型额度、A4 发送确认、真实弹窗/托盘点击、双微信 30 分钟、干净 VM、最终 0.5.9 clean build 安装签收。

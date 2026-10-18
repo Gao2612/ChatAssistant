@@ -159,3 +159,13 @@ assert item["status"] == "visible", f"微信窗口不是 visible: {item['status'
 
 - **C2 已完成（隔离升级验证）**：0.4.3（5cafa1a）→0.5.8（a3b2994），26/26 步 ok；安装/覆盖升级/默认卸载保留数据/重装读取恢复全部 exit 0；真实 profile before==after、E:\ChatAssistantLite 与 0.5.7 注册表/进程未动；V2→V2（migrated=false）如实记录。差距：test-only AppId、0.4.x 为 git 历史重建、非干净 VM、正式 AppId 升级待 Codex/VM。证据 `docs/windows/CODEX_TAKEOVER_C2_UPGRADE.md`。
 - C4 完成、C5 完成并同步 Codex 面板；C1 真实 UI 4 次驱动失败（未证伪产品，待 Codex/用户复验，不标完成）；C3 首跑被误杀，正在重跑。
+## 最终接管结果索引（2026-10-18 11:00）
+
+详细结果与交还说明见 [CODEX_TAKEOVER_RESULT_2026-10-18.md](CODEX_TAKEOVER_RESULT_2026-10-18.md)。
+
+- C1：完成（带限定，UIA 等价按钮槽真实成功；native 鼠标/A-B 未完成）→ Codex 面板 completed 100 带限定
+- C2：完成（隔离 0.4.3→0.5.8 生命周期 26/26）→ Codex 面板 completed 100 带差距
+- C3：部分完成（自动 dock/minimize/tray 通过；真实弹窗/托盘按钮/视觉为人工）→ Codex 面板 in_progress 85
+- C4：完成（真实郜亚禹/田子夜 ok，无 Enter/发送；前景守卫）→ Codex 面板 completed 100
+- C5：完成（合成 T9/T10 17 项 OK）→ Codex 面板 completed 100 注明合成
+- 全量测试（C1/C3 提交前）：750 OK / 37 skipped / exit 0；冻结后 clean rebuild 0.5.9 + 覆盖安装，再交用户签收。
