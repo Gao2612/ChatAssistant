@@ -69,7 +69,7 @@
 | T8 档案/趋势/统计/任务界面 | ✅ 2026-10-18 完成，commit `0000cd4` | history_statistics/profile_ui + history_ui 五标签；定向 41/68 项、真实 T7 联调通过；PySide6 关闭期崩溃已修；DPI 真实屏幕留 T12 |
 | T9 记忆检索与实时建议整合 | 🟡 UI 集成完成（今日提交）：会话↔联系人绑定 + 历史参考注入 + “参考历史 N 条”入口；真实模型长上下文/引用展示实机验收留 T12 | 未绑定不检索；切换会话/窗口失效；434/634 全量通过；真实模型回合与 T12 集中验收待做 |
 | T10 多微信来源调度 | 🟡 代码完成（registry/scheduler/background monitor + 15 项测试，UI 开关默认关闭、最多 2 个后台来源）；真实双窗口 30 分钟与 CPU/句柄趋势留 T12 | active 优先、后台默认关闭、最小化暂停、帧未变不重复 OCR、单源关闭不影响其他；后台不移动/不键入窗口 | `source_registry.py`/`capture_scheduler.py` |
-| T11 构建追溯与安装生命周期 | ✅ 代码/构建/隔离安装已验证（干净 VM 归 T12）；0.4.1 已重建并验证（build_info 摘要 clean、中文安装器、隔离 install/self-test/uninstall 保留数据 ok=true、安装版 version/self-test/smoke×3 exit 0）；干净 VM 与真实升级留 T12 | 候选包 0.5.7 SHA256 `35C37FEC…CE3E34E`（0.4.x/0.5.0–0.5.6 为中间包）；安装版 0.5.7 已覆盖安装到 `E:\ChatAssistantLite` |
+| T11 构建追溯与安装生命周期 | ✅ 代码/构建/隔离安装已验证（干净 VM 归 T12）；0.4.1 已重建并验证（build_info 摘要 clean、中文安装器、隔离 install/self-test/uninstall 保留数据 ok=true、安装版 version/self-test/smoke×3 exit 0）；干净 VM 与真实升级留 T12 | 候选包 0.5.9 SHA256 `119FCC83…40BE1B6`（0.4.x/0.5.0–0.5.8 为中间包）；安装版 0.5.9 已覆盖安装到 `E:\ChatAssistantLite` |
 | T12 集中实机验收 | 🟡 自动项已通过（3×644 回归、单实例、版本无泄露、自检 fail-closed、隔离安装生命周期）；真实微信场景待人工；候选包 0.4.1（SHA256 `F8EC437C…2DC69E`）已装；自动项（version/self-test/smoke×3、隔离 install 生命周期）通过，11 项真实场景逐项进行中 | 面板 S-V01…S-V11，做一项同步一项；人工扫码/输入法/弹窗/双窗口等待用户在场 |
 | S-安装包中文化 | ✅ commit `f9e7c6d` | 内置简体中文语言文件（向导/卸载/任务/启动描述），ISCC 编译通过；随下一版安装包生效 |
 | S-回复风格扩充 | ✅ commit `f9e7c6d` | 9 个预设 + 可自定义、禁滚轮、自定义文本保留；16 项 UI 定向通过 |

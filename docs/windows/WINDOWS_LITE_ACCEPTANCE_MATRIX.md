@@ -173,3 +173,9 @@
 - 真实复现：应用已连接时，第二个 WGC 会话（动作里的 OCR 采集）会被 UI 的持续采集抢帧，导致 `search_not_found/result_not_found`；改为动作前 `stop_capture()`、动作结束后 `wechat_action_done` 自动重连
 - 修复后 UI 跨进程触发仍然得到 `没有找到微信搜索框`；代码级直接查找在相同窗口 `ok=true`。说明还有跨进程/前台时序因素，UI 点击路径保留人工验收，不写通过
 - 全量 668 项测试 exit 0
+### 候选包 0.5.9（Codex 接管后 clean build，2026-10-18）
+
+- 版本 0.5.9；安装包 SHA-256 `119FCC834E2D280CA3093EB804AB2835A786E65D720F85D893A86A52240BE1B6`
+- Git `13c7ff3`（clean）、147 个源文件；`--version-json` 0.5.9；隔离 `--self-test` exit 0；`--smoke` exit 0；`package.ps1 -VerifyInstall` ok=true；已覆盖安装到 `E:\ChatAssistantLite`；桌面/开始菜单快捷方式由安装器重建
+- 包含 DeepSeek 临时接管的 C1（安全 UI find 路径/H3/H4/P2-10）、C2（隔离升级验证工具）、C3（真实窗口验收工具）、C4（屏幕抓取+exact+foreground 守卫）、C5（合成验收）以及 Codex 0.5.8 基线
+- 全量：**750 tests OK / 37 skipped / exit 0**（提交前）；完整 clean-VM/真实模型/A4 发送/双微信仍待用户/Codex
