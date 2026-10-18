@@ -249,3 +249,14 @@
 - **补齐旧残缺数据**：`import_jobs` 把 parser_name 写入来源身份；`history` 对“同 digest、不同 parser”的重复导入原地替换来源（同 source_id、版本递增、派生物失效），不新增重复来源
 - 真实样本端到端：**1684 条 / 16912 字**（原 13 条），sender/sent_at 完整，时间跨度 2026-08-31→2026-10-18，重导幂等；跳过图片 110 + 表情 60 并计数
 - 全量 **933 tests OK / 42 skipped**
+### 候选包 0.5.28 安装版端到端复验（2026-10-18）
+
+- 对象：已安装 `E:\ChatAssistantLite\ChatAssistantLite.exe`（0.5.28，PID 35512），非源码树运行
+- 操作路径：悬浮球 → `档案 ↗` → 主窗历史页 → `导入聊天记录` → 文件对话框输入真实路径 → 确认同名档案关联 → 导入完成
+- 界面结果：`完成：1684 个文字片段，约 16912 字。`；页脚 `已导入 1684 个文字片段；内容仅保存在本机。已自动生成联系人基础档案；可在档案页启动模型逐句分析。`
+- 数据库直查（`memory.sqlite3` 副本）：`sources` 仍仅 **1** 行，`source_id` 未变（`d9ad5a63…`）→ 旧的 13 条残片被**原地替换**，未产生重复来源
+- 字段变化：`parser_version 1 → exportwechat_json`、`record_count 13 → 1684`、`char_count 57 → 16912`、`import_version 1 → 2`、`failure_count 0`
+- 记录表：1684 行、`sum(char_count)=16912`、ordinal 0–1853 无空洞、`record_type` 全为 `message`；该联系人 `scope_state` 升到 source_set_version 2 / memory_version 2（派生物已失效待重建）
+- 导入后自动生成基础档案：关系定位 `普通联系人/待确认`、话题与重要日期（9月5日/12日/13日）已出，`model_analyzed=false`；模型逐句分析需用户重填 DeepSeek API Key
+- 结论：0.5.28 在安装版真实路径上修复确认；未发送任何消息、未保存真实聊天内容到仓库/文档/截图
+- 遗留小问题（不阻塞）：本地基础档案「常聊话题」把来源标签 `ExportWeChat HTML` 当成第 7 个话题，超出 `MAX_TOPIC_ITEMS=6`，应在话题切片前合并/裁剪

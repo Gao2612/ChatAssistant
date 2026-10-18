@@ -18,6 +18,7 @@ from types import SimpleNamespace
 
 from liteapp.auto_profile import (
     DEFAULT_RELATION,
+    MAX_TOPIC_ITEMS,
     build_local_profile,
     needs_model_analysis,
 )
@@ -126,6 +127,30 @@ class AutoProfileTests(unittest.TestCase):
         haystack = json.dumps(profile.as_dict(), ensure_ascii=False)
         self.assertNotIn(unique, haystack)
         self.assertNotIn("先看报价单", haystack)
+
+    def test_topic_list_never_exceeds_cap_with_source_labels(self):
+        # 8 类关键词全部命中 + 3 种来源格式 → 仍不得超过 MAX_TOPIC_ITEMS。
+        texts = [
+            "客户：预算和报价多少？库存现货能发货吗？",
+            "客户：规格型号和尺寸参数我要确认。",
+            "客户：售后保修怎么算？",
+            "客户：项目会议和考试安排。",
+            "客户：周末家里孩子生日。",
+            "客户：最近熬夜体检。",
+            "客户：想你了，纪念日礼物。",
+        ]
+        self.import_records(texts, name="many.html", kind="html", prefix="many-h")
+        self.import_records(texts, name="many.pdf", kind="pdf", prefix="many-p")
+        self.import_records(texts, name="many.html", kind="exportwechat_html",
+                            prefix="many-e")
+        profile = self.build()
+        self.assertIsNotNone(profile.topics)
+        self.assertLessEqual(len(profile.topics), MAX_TOPIC_ITEMS)
+        # 来源格式标签有优先名额，不会被关键词话题挤掉。
+        self.assertIn("HTML", profile.topics)
+        self.assertIn("PDF", profile.topics)
+        self.assertIn("ExportWeChat HTML", profile.topics)
+        self.assertEqual(len(profile.topics), len(set(profile.topics)))
 
     def test_empty_scope_still_creates_base_profile(self):
         empty_scope = self.history.create_person("空记录联系人", "账号-A")

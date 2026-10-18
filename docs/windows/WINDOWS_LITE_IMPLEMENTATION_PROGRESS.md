@@ -225,3 +225,5 @@
 - `import_jobs` 将 `match.parser_name` 写入 `ImportSource.parser_version`；`history.import_records` 在 digest 相同但 parser 身份不同时原地替换来源（同 source_id、import_version+1、派生物失效），支持“残缺 13 条 → 完整 1684 条”补齐。
 - 真实样本 e2e：1684 条/16912 字，`我`888/对方 796，时间跨度 2026-08-31 10:12:33 → 2026-10-18 09:40:48，重导 duplicate=True；跳过图片 110/表情 60。
 - 全量 933 tests OK/42 skipped；0.5.28 已安装（SHA `08A0400C…D474D12`）。
+- **安装版复验（2026-10-18 追加）**：在 `E:\ChatAssistantLite` 已安装 0.5.28 中走真实 UI（悬浮球→`档案 ↗`→历史页→`导入聊天记录`→真实路径→同名档案确认），界面报 `完成：1684 个文字片段，约 16912 字。`；直查数据库 `sources` 仍 1 行且 `source_id` 不变，`parser_version 1→exportwechat_json`、`record_count 13→1684`、`char_count 57→16912`、`import_version 1→2`、`failure_count 0`，`records` 1684 行、ordinal 0–1853、`sum(char_count)=16912`，`scope_state` 升到 source_set_version/memory_version 2。即安装版确认“旧残片原地升级为完整历史、无重复来源”。
+- **修复（同批）**：`auto_profile._topics_value` 原先把来源标签 `ExportWeChat HTML` 追加在 top-6 之后，常聊话题会出现第 7 项，超出 `MAX_TOPIC_ITEMS=6`；现改为来源标签先占名额（最多 6 个），关键词话题按命中次数补满剩余名额，总数恒不超上限且标签不被挤出；新增回归用例覆盖 8 类关键词 + HTML/PDF/ExportWeChat 三种来源。全量 **934 tests OK / 42 skipped**。

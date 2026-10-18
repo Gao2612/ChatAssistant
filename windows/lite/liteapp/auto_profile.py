@@ -183,19 +183,33 @@ def _iter_texts(store: Any, scope: ScopeKey, source_version: int) -> list[str]:
     return texts
 
 
+def _source_kind_labels(source_kinds: list[str]) -> list[str]:
+    """来源格式标签（HTML/PDF/…），去重且保持出现顺序。"""
+    labels: list[str] = []
+    for kind in source_kinds:
+        label = _SOURCE_KIND_LABELS.get(str(kind), str(kind).strip() or "其它")
+        if label not in labels:
+            labels.append(label)
+    return labels
+
+
 def _topics_value(texts: list[str], source_kinds: list[str]) -> list[str] | None:
-    """话题标签列表（与模型档案的 topics 列表同构），只含关键词/来源标签。"""
+    """话题标签列表（与模型档案的 topics 列表同构），只含关键词/来源标签。
+
+    来源标签占名额，关键词话题按命中次数补满，保证总数不超过
+    ``MAX_TOPIC_ITEMS``（标签永远不会被挤出，也不会撑破上限）。
+    """
+    labels = _source_kind_labels(source_kinds)[:MAX_TOPIC_ITEMS]
+    keyword_budget = max(MAX_TOPIC_ITEMS - len(labels), 0)
     counts: list[tuple[str, int]] = []
     for name, pattern in _TOPIC_PATTERNS:
         count = sum(1 for text in texts if pattern.search(text))
         if count:
             counts.append((name, count))
     counts.sort(key=lambda item: (-item[1], item[0]))
-    topics = [name for name, _count in counts[:MAX_TOPIC_ITEMS]]
-    for kind in source_kinds:
-        label = _SOURCE_KIND_LABELS.get(str(kind), str(kind) or "其它")
-        if label not in topics:
-            topics.append(label)
+    topics = [name for name, _count in counts if name not in labels]
+    topics = topics[:keyword_budget]
+    topics.extend(labels)
     return topics or None
 
 
