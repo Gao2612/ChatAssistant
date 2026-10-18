@@ -991,7 +991,7 @@ class MainWindow(QMainWindow):
     def __init__(self, config=None, scanning=True, window_manager=None, account_store=None,
                  inference_queue=None):
         super().__init__()
-        self.setWindowTitle("微信实时助手 · 便捷版 0.5.10")
+        self.setWindowTitle("微信实时助手 · 便捷版 0.5.11")
         self.resize(1000, 520)
         self.setMinimumSize(900, 500)
         self.setStyleSheet(STYLE)
@@ -1134,6 +1134,11 @@ class MainWindow(QMainWindow):
         self.analysis_status.setWordWrap(False)
         self.analysis_status.setMinimumWidth(50)
         chat_header.addWidget(self.analysis_status)
+        self.floating_button = QPushButton("悬浮窗")
+        self.floating_button.setToolTip(
+            "只显示原生微信窗口状态与分析按钮；其余功能在主界面保留")
+        self.floating_button.clicked.connect(self.toggle_floating)
+        chat_header.addWidget(self.floating_button)
         chat_layout.addLayout(chat_header)
 
         chat_body = QHBoxLayout()
@@ -1587,6 +1592,31 @@ class MainWindow(QMainWindow):
         self.ai_panel.setVisible(visible)
         self.ai_toggle.setChecked(visible)
         self.ai_toggle.setToolTip("收起 AI 建议" if visible else "展开 AI 建议")
+
+    def toggle_floating(self):
+        """Switch between the full main window and the compact floating view.
+
+        The floating window is only a view: capture/analysis keep running in this
+        MainWindow while it is hidden.
+        """
+        if getattr(self, "floating", None) is None:
+            from .floating import FloatingAssistant
+            self.floating = FloatingAssistant(self)
+        floating = self.floating
+        if floating.isVisible():
+            floating.hide()
+            self.show()
+            self.raise_()
+            self.activateWindow()
+            return
+        screen = self.screen()
+        if screen is not None:
+            area = screen.availableGeometry()
+            floating.move(area.right() - floating.width() - 24, area.top() + 80)
+        floating.refresh()
+        floating.show()
+        floating.raise_()
+        self.hide()
 
     def set_connection_status(self, text):
         self.connection_status.setText(text)
@@ -3170,6 +3200,13 @@ class MainWindow(QMainWindow):
         self.poll.stop()
         self.dock_timer.stop()
         self._stop_background_monitoring()
+        floating = getattr(self, "floating", None)
+        if floating is not None:
+            try:
+                floating.close()
+            except RuntimeError:
+                pass
+            self.floating = None
         if self._inference_queue is not None:
             try:
                 self._inference_queue.stop()

@@ -15,7 +15,7 @@ import time
 
 import numpy as np
 
-from .discovery import WindowTarget, valid
+from .discovery import WindowTarget, valid, window_status
 
 _u32 = ctypes.windll.user32
 _gdi32 = ctypes.windll.gdi32
@@ -86,7 +86,11 @@ def capture_hidden_window(window, *, settle: float = 0.85,
     if not isinstance(window, WindowTarget) or not valid(window):
         return None
     hwnd = int(window)
-    if _u32.IsWindowVisible(hwnd):
+    # A window closed to the tray is often DWM-cloaked yet still reports
+    # IsWindowVisible=True (WeChat just parks it off-screen); use the richer
+    # lifecycle status so the hidden path is reachable. Only a genuinely visible
+    # window is left to the normal WGC path.
+    if window_status(hwnd) == "visible":
         return None
     was_minimized = bool(_u32.IsIconic(hwnd))
     left, top, right, bottom = _rect(hwnd)
