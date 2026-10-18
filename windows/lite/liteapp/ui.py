@@ -27,6 +27,7 @@ from .discovery import (
 )
 from .worker import run as capture_run
 from . import account_store, analysis, backends, codex_backend, reading, subscription
+from .design.style_loader import load_stylesheet
 from .history_ui import HistoryPage
 from .history_analysis_store import AnalysisStore
 from .history_jobs import HistoryJobs
@@ -159,6 +160,21 @@ QScrollBar::handle:vertical:hover { background: #A9BDB4; }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
 QFrame#divider { background: #DEDBD2; max-height: 1px; border: 0; }
 """
+
+
+def _apply_stylesheet(widget, fallback):
+    """优先套用随包发布的 global.qss，资源缺失时回退到内联样式。
+
+    ``load_stylesheet`` 在 ``liteapp/resources`` 没有随包发布时返回空串
+    （打包漏资源、安装目录损坏等），此时必须保留可用的内联样式，而不是
+    让界面退化成裸 Qt 控件。
+    """
+    stylesheet = load_stylesheet("global.qss")
+    if not stylesheet:
+        print("[ui] 未找到 global.qss，已回退内联 STYLE")
+        stylesheet = fallback
+    widget.setStyleSheet(stylesheet)
+    return stylesheet
 
 
 def section_title(text):
@@ -1124,7 +1140,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("微信实时助手 · 便捷版 0.5.29")
         self.resize(1000, 520)
         self.setMinimumSize(900, 500)
-        self.setStyleSheet(STYLE)
+        _apply_stylesheet(self, STYLE)
         self.config = config if config is not None else settings.load()
         # Locate the existing official WeChat client automatically: users should not
         # have to browse for Weixin.exe (4.x) / WeChat.exe (older builds) themselves.
@@ -1212,6 +1228,7 @@ class MainWindow(QMainWindow):
         self._history_jobs = None
         self._history_analysis_store = None
         root = QWidget()
+        root.setObjectName("appRoot")  # matches QWidget#appRoot in global.qss
         self.setCentralWidget(root)
         layout = QHBoxLayout(root)
         layout.setContentsMargins(0, 0, 0, 0)
