@@ -117,3 +117,21 @@ Lead 会为每个接管项建 `source=deepseek` 镜像任务（`TAKE-C1…TAKE-C
 | 10:55 后 | windows（C1） | App 内点击自动查找的真实 UI 验证 |
 
 非窗口时间各 agent 只做代码分析/脚本/单测；任何时刻不发送微信消息、不保存聊天内容。
+## 真实窗口前置检查（强制，2026-10-18 10:18 事故后新增）
+
+**事故**：用户发现微信主窗口处于 minimized 状态时，C4 已开始 OCR/查找准备。用户明确要求：微信窗口没打开时不应开始 OCR。
+处置：暂停 C4/C3，恢复微信窗口为 visible（hwnd 394618，rect `[144,104,1383,898]`），要求丢弃窗口非 visible 期间采集的 OCR/查找证据。
+
+### 每个真实窗口任务开始前必须检查
+
+```python
+from liteapp import discovery
+windows = discovery.find_wechat_windows(WECHAT, include_hidden=True)
+item = next(w for w in windows if not w["tool_window"])
+assert item["status"] == "visible", f"微信窗口不是 visible: {item['status']}"
+```
+
+- 不是 `visible`：**停止并报告 Lead**，不得自行 OCR、点击、minimize/hide/move 用户窗口。
+- C3 的“最小化测试”必须在同一脚本内 `finally` 恢复 `visible`，结束状态必须是 visible。
+- 证据 MD 第一行写：`preflight: visible`、应用版本/commit（0.5.8 source tree `a3b2994`）。
+- 窗口非 visible 期间采集的任何结果一律作废，不写证据、不下结论。
