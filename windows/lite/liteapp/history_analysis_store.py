@@ -339,6 +339,103 @@ class AnalysisStore:
                 raise AnalysisJobError("历史分析任务不存在。")
         return self.get_job(job_id)
 
+    def cancel_job(self, job_id: str) -> AnalysisJob:
+        """Atomically cancel a nonterminal job without overwriting completion."""
+        if not isinstance(job_id, str) or not job_id:
+            raise TypeError("job_id 必须是非空字符串。")
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            cursor = db.execute(
+                "UPDATE analysis_jobs SET status='cancelled', message=?, updated_at=? "
+                "WHERE job_id=? AND status NOT IN ('completed','cancelled')",
+                ("任务已取消。", _now(), job_id))
+            if cursor.rowcount == 0 and db.execute(
+                    "SELECT 1 FROM analysis_jobs WHERE job_id=?", (job_id,)
+            ).fetchone() is None:
+                raise AnalysisJobError("历史分析任务不存在。")
+        return self.get_job(job_id)
+
+    def transition_job(self, job_id: str, *, expected_statuses,
+                       status: str, stage: str | None = None,
+                       message: str | None = None) -> AnalysisJob:
+        """Change job state only if its current state is still expected."""
+        expected = tuple(expected_statuses)
+        if not expected:
+            raise ValueError("expected_statuses 不能为空。")
+        if status not in JOB_STATUSES or any(item not in JOB_STATUSES for item in expected):
+            raise ValueError("未知任务状态。")
+        changes, values = ["status=?"], [status]
+        if stage is not None:
+            if stage not in JOB_STAGES:
+                raise ValueError(f"未知任务阶段：{stage!r}")
+            changes.append("stage=?")
+            values.append(stage)
+        if message is not None:
+            changes.append("message=?")
+            values.append(str(message)[:500])
+        changes.append("updated_at=?")
+        values.append(_now())
+        values.extend([job_id, *expected])
+        placeholders = ",".join("?" for _ in expected)
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            cursor = db.execute(
+                f"UPDATE analysis_jobs SET {', '.join(changes)} "
+                f"WHERE job_id=? AND status IN ({placeholders})", values)
+            if cursor.rowcount == 0 and db.execute(
+                    "SELECT 1 FROM analysis_jobs WHERE job_id=?", (job_id,)
+            ).fetchone() is None:
+                raise AnalysisJobError("历史分析任务不存在。")
+        return self.get_job(job_id)
+
+    def pause_job(self, job_id: str, message: str) -> AnalysisJob:
+        return self.transition_job(
+            job_id, expected_statuses=("pending", "running"),
+            status="paused", message=message)
+
+    def resume_job(self, job_id: str) -> AnalysisJob:
+        return self.transition_job(
+            job_id, expected_statuses=("pending", "paused", "running"),
+            status="running", message="")
+
+    def start_job(self, job_id: str) -> AnalysisJob:
+        return self.transition_job(
+            job_id, expected_statuses=("pending",), status="running")
+
+    def save_report_and_complete(self, job_id: str, payload: dict) -> AnalysisJob:
+        """Publish the report and mark completion in one serialized transaction.
+
+        If cancellation commits first, the report is not published. If this
+        transaction commits first, a later cancel observes ``completed``.
+        """
+        if not isinstance(payload, dict):
+            raise TypeError("报告 payload 必须是字典。")
+        blob = self._seal(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+        now = _now()
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT account_id, person_id, source_version, memory_version, "
+                "profile_id, model_version, prompt_version, status "
+                "FROM analysis_jobs WHERE job_id=?", (job_id,)).fetchone()
+            if row is None:
+                raise AnalysisJobError("历史分析任务不存在。")
+            if row[7] != "running":
+                return self.get_job(job_id)
+            db.execute(
+                "INSERT INTO analysis_reports(job_id, account_id, person_id, "
+                "source_version, memory_version, profile_id, model_version, "
+                "prompt_version, payload, created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                (job_id, row[0], row[1], row[2], row[3], row[4], row[5], row[6],
+                 blob, now))
+            cursor = db.execute(
+                "UPDATE analysis_jobs SET status='completed', stage='done', "
+                "message='', updated_at=? WHERE job_id=? AND status='running'",
+                (now, job_id))
+            if cursor.rowcount != 1:
+                raise AnalysisJobError("任务状态已改变，未发布历史分析报告。")
+        return self.get_job(job_id)
+
     def find_latest_job(self, scope: ScopeKey, profile_id: str, model_version: str,
                         prompt_version: str, source_version: int,
                         memory_version: int) -> AnalysisJob | None:
@@ -410,8 +507,8 @@ class AnalysisStore:
 
     def complete_batch(self, job_id: str, batch_index: int, *,
                        covered: Sequence[tuple[str, int, int]],
-                       items: Sequence[tuple[str, str, Sequence[tuple[str, int, int]]]]) -> None:
-        """Transactionally record a succeeded batch: covered ranges + validated items."""
+                       items: Sequence[tuple[str, str, Sequence[tuple[str, int, int]]]]) -> bool:
+        """Record a succeeded batch only while its job is still running."""
         covered_rows = [(str(record_id), int(start), int(end))
                         for record_id, start, end in covered]
         if not covered_rows:
@@ -419,13 +516,20 @@ class AnalysisStore:
         record_ids = {record_id for record_id, _start, _end in covered_rows}
         now = _now()
         with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            job = db.execute("SELECT status FROM analysis_jobs WHERE job_id=?",
+                             (job_id,)).fetchone()
+            if job is None:
+                raise AnalysisJobError("历史分析任务不存在。")
+            if job[0] != "running":
+                return False
             row = db.execute(
                 "SELECT status FROM analysis_batches WHERE job_id=? AND batch_index=?",
                 (job_id, batch_index)).fetchone()
             if row is None:
                 raise AnalysisJobError("历史分析批次不存在。")
             if row[0] == "succeeded":
-                return
+                return True
             for category, text, evidence in items:
                 evidence_rows = [[str(record_id), int(start), int(end)]
                                  for record_id, start, end in evidence]
@@ -441,6 +545,7 @@ class AnalysisStore:
                 (len(record_ids),
                  json.dumps([list(row) for row in covered_rows], ensure_ascii=False),
                  now, job_id, batch_index))
+        return True
 
     # ------------------------------------------------------------------ manifest
     def record_char_counts(self, job_id: str) -> dict[str, int]:

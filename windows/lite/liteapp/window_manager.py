@@ -455,12 +455,16 @@ class WindowManager:
                                             reason="geometry_mismatch"))
         attachment.zorder_ok = self._zorder_or_repair(attachment, hwnd, foreground)
         overlay = self._overlay_safe(attachment)
+        host = self._window_handle(attachment.host_hwnd)
+        covered_by_foreign = (not attachment.zorder_ok
+                              and foreground not in (hwnd, host))
         return self._set(DockStatus(
             state="attached", ok=True, source=attachment.source, hwnd=hwnd,
             rect=actual, original_rect=attachment.original_rect,
             original_minimized=attachment.original_minimized,
             zorder_ok=attachment.zorder_ok, overlay_safe=overlay,
-            read_only=not overlay))
+            read_only=not overlay,
+            reason="foreign_foreground" if covered_by_foreign else ""))
 
     def set_view(self, mode):
         """chat / settings / history / minimized; hides the managed WeChat only."""
@@ -586,6 +590,10 @@ class WindowManager:
         zorder_ok = attachment.zorder_ok and not hidden and not minimized
         overlay_safe = bool(identity_ok and zorder_ok and popup is None
                             and not hidden and not minimized)
+        foreground = int(self._foreground() or 0)
+        host_hwnd = self._window_handle(attachment.host_hwnd)
+        covered_by_foreign = (not hidden and not minimized and not zorder_ok
+                              and foreground not in (hwnd, host_hwnd))
         capture_ok = self._is_recent(heartbeat_age) or self._is_recent(frame_age)
         fresh_frame = self._is_recent(frame_age)
         changed = change_age is not None and change_age <= self.change_window
@@ -618,7 +626,7 @@ class WindowManager:
             zorder_ok=zorder_ok, overlay_safe=overlay_safe,
             read_only=not overlay_safe, heartbeat_age=heartbeat_age,
             frame_age=frame_age, change_age=change_age, ocr_age=ocr_age,
-            reason=reason)
+            reason=("foreign_foreground" if covered_by_foreign else reason))
 
     # -- internals -----------------------------------------------------------
     def _require_source(self, source):

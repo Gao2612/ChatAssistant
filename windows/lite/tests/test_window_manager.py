@@ -583,10 +583,14 @@ class WindowManagerFakeTests(unittest.TestCase):
         self.assertFalse(status.zorder_ok)
         self.assertFalse(status.overlay_safe)
         self.assertTrue(status.read_only)
+        self.assertEqual(status.reason, "foreign_foreground")
+        self.assertEqual(manager.capture_health(self.source).reason,
+                         "foreign_foreground")
         self.assertEqual(self.api.set_pos_calls(), [], "must not reorder under a foreign app")
         foreground[0] = 20  # assistant group activated
         status = manager.sync()
         self.assertTrue(status.overlay_safe)
+        self.assertEqual(status.reason, "")
         self.assertEqual(len(self.api.set_pos_calls()), 1)
 
     def test_sync_lost_identity_detaches_without_touching_handle(self):

@@ -40,6 +40,7 @@ from .history_models import (
     EvidenceText,
     HistoryError,
     HistoryImportError,
+    HistoryAccount,
     HistoryRecord,
     ImportResult,
     ImportSource,
@@ -259,6 +260,99 @@ class HistoryStore:
         return int(row[0]), int(row[1])
 
     # ------------------------------------------------------------- account/people
+    def list_accounts(self) -> list[HistoryAccount]:
+        """List local history buckets; labels never serve as stable identity."""
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT id, legacy_hash, label FROM wechat_accounts ORDER BY rowid"
+            ).fetchall()
+        return [HistoryAccount(account_id=row[0], label=self._open(row[2]),
+                               legacy=row[1] is not None) for row in rows]
+
+    def ensure_legacy_account(self, label: str) -> HistoryAccount:
+        """Return the old label-backed bucket, creating it only when absent."""
+        with self._connect() as db:
+            account_id = self._ensure_account(db, label)
+            row = db.execute(
+                "SELECT legacy_hash,label FROM wechat_accounts WHERE id=?",
+                (account_id,)).fetchone()
+        return HistoryAccount(account_id, self._open(row[1]), row[0] is not None)
+
+    def create_account(self, label: str) -> HistoryAccount:
+        """Create an explicitly named app-owned account bucket."""
+        if not isinstance(label, str):
+            raise TypeError("资料名称必须是字符串。")
+        label = label.strip()
+        if not label or len(label) > 200 or "\x00" in label:
+            raise ValueError("请输入 1 至 200 个字符的资料名称。")
+        with self._connect() as db:
+            rows = db.execute("SELECT label FROM wechat_accounts").fetchall()
+            if any(self._open(row[0]).casefold() == label.casefold() for row in rows):
+                raise ValueError("资料名称已存在，请使用不同名称。")
+            account_id = uuid.uuid4().hex
+            db.execute("INSERT INTO wechat_accounts(id,legacy_hash,label) VALUES(?,NULL,?)",
+                       (account_id, self._seal(label)))
+        return HistoryAccount(account_id, label, False)
+
+    def rename_account(self, account_id: str, label: str) -> HistoryAccount:
+        """Rename a user-created bucket without changing its identity."""
+        if not isinstance(account_id, str) or not account_id.strip():
+            raise ValueError("资料 ID 无效。")
+        if not isinstance(label, str):
+            raise TypeError("资料名称必须是字符串。")
+        label = label.strip()
+        if not label or len(label) > 200 or "\x00" in label:
+            raise ValueError("请输入 1 至 200 个字符的资料名称。")
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT legacy_hash FROM wechat_accounts WHERE id=?", (account_id,)
+            ).fetchone()
+            if row is None:
+                raise ValueError("资料不存在。")
+            if row[0] is not None:
+                raise ValueError("旧的未区分资料不能重命名，避免误认历史归属。")
+            labels = db.execute(
+                "SELECT id,label FROM wechat_accounts WHERE id<>?", (account_id,)
+            ).fetchall()
+            if any(self._open(other_label).casefold() == label.casefold()
+                   for _, other_label in labels):
+                raise ValueError("资料名称已存在，请使用不同名称。")
+            db.execute("UPDATE wechat_accounts SET label=? WHERE id=?",
+                       (self._seal(label), account_id))
+        return HistoryAccount(account_id, label, False)
+
+    def create_person_in_account(self, account_id: str,
+                                 display_name: str) -> ScopeKey:
+        """Create a contact under an explicitly selected account ID."""
+        if not isinstance(display_name, str):
+            raise TypeError("display_name 必须是字符串。")
+        display_name = display_name.strip()
+        if not display_name or len(display_name) > 200:
+            raise ValueError("请输入有效的联系人名称。")
+        with self._connect() as db:
+            exists = db.execute("SELECT 1 FROM wechat_accounts WHERE id=?",
+                                (account_id,)).fetchone()
+            if exists is None:
+                raise ValueError("所选资料不存在，请刷新后重试。")
+            person_id = uuid.uuid4().hex
+            db.execute("INSERT INTO people(id,account_id,display_name) VALUES(?,?,?)",
+                       (person_id, account_id, self._seal(display_name)))
+            db.execute(
+                "INSERT INTO scope_state(account_id,person_id,source_set_version,"
+                "memory_version) VALUES(?,?,0,0)", (account_id, person_id))
+        return ScopeKey(account_id, person_id)
+
+    def list_people_in_account(self, account_id: str) -> list[PersonInfo]:
+        """List contacts using a stable account ID rather than a display label."""
+        if not isinstance(account_id, str) or not account_id.strip():
+            return []
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT id,display_name FROM people WHERE account_id=? ORDER BY rowid",
+                (account_id,)).fetchall()
+        return [PersonInfo(account_id, person_id, self._open(blob))
+                for person_id, blob in rows]
+
     def create_person(self, display_name: str,
                       account_key: str = "default") -> ScopeKey:
         """Create one contact under an account; returns its immutable ScopeKey.

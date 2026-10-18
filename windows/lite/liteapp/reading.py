@@ -144,5 +144,6 @@ def reading_ready(config):
             return False
         return bool((config.get("reading_model") or "").strip())
     if backend == "codex":
-        return codex_backend.available(config)
+        return bool((config.get("reading_model") or "").strip()
+                    and codex_backend.available(config))
     return False

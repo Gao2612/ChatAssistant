@@ -8,6 +8,8 @@ from unittest.mock import patch
 
 from liteapp import codex_backend
 from liteapp.analysis import parse_result
+from liteapp.contracts import CancellationToken
+from liteapp.inference_schemas import InferenceRequest, KIND_HISTORY_EXTRACT
 from liteapp.reading import parse_snapshot
 
 FAKE = str(Path(__file__).with_name("fake_codex_app_server.py"))
@@ -77,6 +79,28 @@ class FakeCodexAppServerTests(unittest.TestCase):
         self.assertEqual(turn["input"], [{"type": "text", "text": "请分析这段合成对话"}])
         self.assertEqual(turn["model"], "fake-text")
 
+    def test_history_inference_uses_ephemeral_codex_turn_and_validates_evidence(self):
+        request = InferenceRequest(
+            task_id="synthetic-history-task", kind=KIND_HISTORY_EXTRACT,
+            profile_id="history:synthetic", input_data={
+                "messages": [{"role": "system", "content": "只输出 JSON"},
+                              {"role": "user", "content": "合成记录"}],
+                "records": [{"record_id": "record-1", "text": "客户问交期"}],
+            }, schema_version="v1", version_key="synthetic-version")
+        server = type("FakeServer", (), {
+            "run_turn": lambda self, prompt, model=None: (
+                '{"items":[{"category":"fact","text":"客户询问交期",'
+                '"evidence":[{"record_id":"record-1","start":0,"end":5}]}]}')
+        })()
+        with patch.object(codex_backend, "_shared", return_value=server):
+            result = codex_backend.run_inference_request(
+                {"codex_path": "synthetic-codex"}, request,
+                model="synthetic-model", cancel=CancellationToken())
+        self.assertEqual(result.validated_data["items"][0]["text"], "客户询问交期")
+        self.assertEqual(result.validated_data["items"][0]["evidence"][0]["record_id"],
+                         "record-1")
+        self.assertEqual(result.request_id, "codex-app-server")
+
     def test_image_turn_sends_data_url_and_parses_snapshot(self):
         server = self._server()
         raw = server.run_turn("请转写画面", image=b"\xff\xd8synthetic-jpeg")
@@ -89,6 +113,12 @@ class FakeCodexAppServerTests(unittest.TestCase):
         image = turn["input"][1]
         self.assertEqual(image["type"], "image")
         self.assertTrue(image["url"].startswith("data:image/jpeg;base64,"))
+
+    def test_image_read_rejects_missing_explicit_model(self):
+        with patch.object(codex_backend, "_shared") as shared:
+            with self.assertRaisesRegex(ValueError, "读取模型"):
+                codex_backend.read_image({}, b"synthetic-image")
+        shared.assert_not_called()
 
     def test_failed_turn_reports_status(self):
         os.environ["FAKE_CODEX_MODE"] = "fail"

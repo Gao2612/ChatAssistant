@@ -28,6 +28,8 @@ from .discovery import (
 from .worker import run as capture_run
 from . import account_store, analysis, backends, codex_backend, reading, subscription
 from .history_ui import HistoryPage
+from .history_analysis_store import AnalysisStore
+from .history_jobs import HistoryJobs
 from .inference import GatewayProfile, InferenceGateway
 from .inference_queue import InferenceQueue
 from .inference_schemas import (
@@ -541,8 +543,13 @@ class SettingsPage(QWidget):
         choices = [(m['display_name'], m['id']) for m in self._codex_models
                    if 'image' in m.get('input_modalities', [])] if backend == 'codex' else []
         preferred = self._reading_choices.get(backend, '')
+        self.reading_model.setEditable(backend == 'api')
         populate_models(self.reading_model, choices, preferred, require_preferred=bool(choices))
-        if not choices:
+        if backend == 'codex' and choices and not preferred:
+            # A first-run Codex catalog must not silently choose a model. The
+            # user selects one of the image-capable IDs explicitly.
+            self.reading_model.setCurrentIndex(-1)
+        if backend == 'api' and not choices:
             self.reading_model.setEditText(preferred)
         self.reading_base.setEnabled(backend == "api")
         self.reading_model.setEnabled(backend in ("api", "codex"))
@@ -582,8 +589,15 @@ class SettingsPage(QWidget):
         if error or not models:
             self.reading_model_status.setText(error or '接口没有返回可用模型。')
             return
-        populate_models(self.reading_model, models, self.reading_model.text())
-        self.reading_model_status.setText(f'已读取 {len(models)} 个模型；列表不保证图像能力，请选择支持视觉的模型。')
+        preferred = self.reading_model.text()
+        populate_models(self.reading_model, models, preferred,
+                        require_preferred=bool(preferred))
+        if preferred and self.reading_model.currentIndex() < 0:
+            self.reading_model_status.setText(
+                '已读取模型列表；原值不是当前目录中的模型 ID，请从列表明确选择。')
+        else:
+            self.reading_model_status.setText(
+                f'已读取 {len(models)} 个模型；列表不保证图像能力，请选择支持视觉的模型。')
 
     def update_chatgpt_state(self, config):
         connected = backends.chatgpt_connected(config)
@@ -659,10 +673,15 @@ class SettingsPage(QWidget):
                 for display, slug in catalog_models:
                     self.model.addItem(display, slug)
             catalog = catalog_values
-            preferred = remembered if remembered in catalog else (catalog[0] if catalog else "")
+            preferred = (remembered if remembered else
+                         (catalog[0] if catalog else ""))
+            if remembered and remembered not in catalog:
+                preferred = ""
             index = self.model.findData(preferred)
             if index >= 0:
                 self.model.setCurrentIndex(index)
+            elif remembered:
+                self.model.setCurrentIndex(-1)
         elif backend == "api":
             self.model.setEditText(remembered)
         elif backend == 'codex' and self._codex_models:
@@ -734,8 +753,12 @@ class SettingsPage(QWidget):
             self.model_status.setText(error or "接口没有返回可用模型。")
             return
         current = selected_model_id(self.model)
-        populate_models(self.model, models, current)
-        self.model_status.setText(f"已读取 {len(models)} 个模型，请选择后保存设置。")
+        populate_models(self.model, models, current, require_preferred=bool(current))
+        if current and self.model.currentIndex() < 0:
+            self.model_status.setText(
+                "已读取模型列表；原值不是当前目录中的模型 ID，请从列表明确选择。")
+        else:
+            self.model_status.setText(f"已读取 {len(models)} 个模型，请选择后保存设置。")
         self.refresh_effective()
 
     def request_disconnect_chatgpt(self):
@@ -753,14 +776,22 @@ class SettingsPage(QWidget):
             return
         remembered = backends.remembered_model(self.config, "chatgpt")
         selected = remembered or self.config.get("model")
+        self.model.blockSignals(True)
         self.model.clear()
         for display, slug in models:
             self.model.addItem(display, slug)
         index = self.model.findData(selected)
         if index >= 0:
             self.model.setCurrentIndex(index)
+        elif selected:
+            self.model.setCurrentIndex(-1)
         elif models:
             self.model.setCurrentIndex(0)
+        self.model.blockSignals(False)
+        if not selected and models:
+            self._remember_model_choice(self.model.currentIndex())
+        else:
+            self.refresh_effective()
 
     def _remember_model_choice(self, _index=0):
         """Persist the ChatGPT model the moment the user picks it.
@@ -769,12 +800,16 @@ class SettingsPage(QWidget):
         only the ChatGPT catalog selection is remembered here.
         """
         if self.backend.currentData() != "chatgpt":
+            self.refresh_effective()
             return
         slug = self.model.currentData()
         if not slug:
+            self.refresh_effective()
             return
         self.config["chatgpt_model"] = str(slug)
+        self.config["model"] = str(slug)
         self.model_remembered.emit(str(slug))
+        self.refresh_effective()
 
     def commit(self):
         try:
@@ -872,6 +907,8 @@ class SettingsPage(QWidget):
             preferred = self.reading_model.text()
             visual = [(m['display_name'], m['id']) for m in models if 'image' in m.get('input_modalities', [])]
             populate_models(self.reading_model, visual, preferred, require_preferred=True)
+            if visual and not preferred:
+                self.reading_model.setCurrentIndex(-1)
             self.reading_model_status.setText('已读取支持图像的 Codex 模型。' if visual else '未返回支持图像的 Codex 模型。')
 
 
@@ -922,6 +959,8 @@ class ResultBus(QObject):
     read_done = Signal(object, object, str)
     account_done = Signal(str, object, str)
     style_done = Signal(str, object, str)
+    model_progress = Signal(int, int, int)
+    model_done = Signal(object, str)
     wechat_action_done = Signal(str, object, str)
     queue_event = Signal(object)
 
@@ -937,15 +976,76 @@ class _UiInferenceGateway:
 
     def __init__(self, window):
         self.window = window
+        self._history_profiles = {}
+        self._history_profile_jobs = {}
+        self._history_config_identity = None
+        self._history_config_profile_id = None
+
+    @staticmethod
+    def _history_config_key(config):
+        backend = backends.analysis_backend(config)
+        # Credentials participate only in this in-memory equality comparison;
+        # they are never serialized, hashed into, or logged with the job ID.
+        return (backend, str(config.get("base_url") or ""),
+                str(config.get("api_provider") or ""),
+                str(backends.effective_model(config) or ""),
+                str(config.get("api_key") or ""),
+                str(config.get("registration_id") or ""),
+                str(config.get("codex_path") or ""))
+
+    def register_history_profile(self, config):
+        """Freeze a backend snapshot for this process without persisting secrets."""
+        snapshot = dict(config)
+        identity = self._history_config_key(snapshot)
+        if identity == self._history_config_identity:
+            return self._history_config_profile_id
+        profile_id = "history:" + uuid.uuid4().hex
+        self._history_profiles[profile_id] = snapshot
+        self._history_config_identity = identity
+        self._history_config_profile_id = profile_id
+        return profile_id
+
+    def retain_history_profile(self, profile_id, job_id):
+        self._history_profile_jobs.setdefault(profile_id, set()).add(job_id)
+
+    def release_history_profile(self, job_id):
+        for profile_id, jobs in tuple(self._history_profile_jobs.items()):
+            jobs.discard(job_id)
+            if jobs:
+                continue
+            self._history_profile_jobs.pop(profile_id, None)
+            self._history_profiles.pop(profile_id, None)
+            if self._history_config_profile_id == profile_id:
+                self._history_config_identity = None
+                self._history_config_profile_id = None
+
+    def discard_unreferenced_history_profile(self, profile_id):
+        if self._history_profile_jobs.get(profile_id):
+            return
+        self._history_profiles.pop(profile_id, None)
+        if self._history_config_profile_id == profile_id:
+            self._history_config_identity = None
+            self._history_config_profile_id = None
 
     def run(self, request, cancel=None):
         config = dict(self.window.config)
-        gateway = InferenceGateway()
+        if request.profile_id.startswith("history:"):
+            config = dict(self._history_profiles.get(request.profile_id) or {})
+            if not config:
+                raise ValueError(
+                    "历史分析任务来自上次运行，原模型配置未恢复；请重新开始任务。")
         backend = backends.analysis_backend(config)
+        model = str(backends.effective_model(config) or "").strip()
+        if not model:
+            raise ValueError("当前分析模型已失效，请在设置中重新选择模型。")
+        if backend == "codex":
+            return codex_backend.run_inference_request(
+                config, request, model=model, cancel=cancel)
+        gateway = InferenceGateway()
         if backend == "chatgpt":
             gateway.register_profile("chatgpt", GatewayProfile(
                 backend="chatgpt", url=account_store.API_BASE + "/responses",
-                model=str(config.get("model") or "").strip(),
+                model=model,
                 api_key=subscription.access_token(config)))
         else:
             base = str(config.get("base_url") or "").strip()
@@ -953,9 +1053,14 @@ class _UiInferenceGateway:
                 base = analysis.DEFAULT_LOCAL_BASE
             gateway.register_profile("analysis", GatewayProfile(
                 backend="compatible", url=analysis.endpoint(base),
-                model=str(config.get("model") or "").strip(),
+                model=model,
                 api_key=str(config.get("api_key") or "").strip()))
-        return gateway.run(request, cancel)
+        gateway_request = request
+        if request.profile_id.startswith("history:"):
+            from dataclasses import replace
+            gateway_request = replace(request, profile_id=(
+                "chatgpt" if backend == "chatgpt" else "analysis"))
+        return gateway.run(gateway_request, cancel)
 
 
 class BrandMark(QWidget):
@@ -997,7 +1102,7 @@ class MainWindow(QMainWindow):
     def __init__(self, config=None, scanning=True, window_manager=None, account_store=None,
                  inference_queue=None):
         super().__init__()
-        self.setWindowTitle("微信实时助手 · 便捷版 0.5.15")
+        self.setWindowTitle("微信实时助手 · 便捷版 0.5.19")
         self.resize(1000, 520)
         self.setMinimumSize(900, 500)
         self.setStyleSheet(STYLE)
@@ -1007,6 +1112,10 @@ class MainWindow(QMainWindow):
         self._style_profile = None
         self.style_busy = False
         self.wechat_busy = False
+        self._model_busy = False
+        self._model_cancel = None
+        self._model_progress_text = ""
+        self._model_result = None
         # C1: pre-lookup render readiness wait + one bounded retry for transient
         # first-frame/search failures (overridable by tests/tools).
         self._wechat_find_ready_wait = 2.5
@@ -1067,6 +1176,8 @@ class MainWindow(QMainWindow):
         self.bus.read_done.connect(self.reading_done)
         self.bus.account_done.connect(self.account_action_done)
         self.bus.style_done.connect(self.style_profile_done)
+        self.bus.model_progress.connect(self.model_profile_progress)
+        self.bus.model_done.connect(self.model_profile_done)
         self.bus.wechat_action_done.connect(self.wechat_action_done)
         self._queue_action_slot = self._run_queue_action
         self.bus.queue_event.connect(self._queue_action_slot)
@@ -1075,6 +1186,9 @@ class MainWindow(QMainWindow):
         # the caller injects a queue), so mere window construction never leaks a
         # model worker into tests or short-lived windows.
         self._inference_queue = inference_queue
+        self._ui_gateway = _UiInferenceGateway(self)
+        self._history_jobs = None
+        self._history_analysis_store = None
         root = QWidget()
         self.setCentralWidget(root)
         layout = QHBoxLayout(root)
@@ -1257,6 +1371,14 @@ class MainWindow(QMainWindow):
         self.page_stack.addWidget(self.settings_page)
         self.history_page = HistoryPage()
         self.history_page.bind_current_requested.connect(self.bind_current_conversation)
+        self.history_page.import_completed.connect(self._history_import_completed)
+        self.history_page.set_import_context_callbacks(
+            self._capture_history_import_context,
+            self._bind_imported_live_history)
+        self.history_page.set_history_analysis_callbacks(
+            self._start_history_analysis, self._history_analysis_progress,
+            self._history_analysis_report, self._resume_history_analysis,
+            self._cancel_history_analysis, self._finish_history_analysis)
         self.page_stack.addWidget(self.history_page)
         self.windows = self.settings_page.windows
         self.connect_button = self.settings_page.connect_button
@@ -1448,6 +1570,8 @@ class MainWindow(QMainWindow):
             self._set_dock_message("微信窗口身份已变化：中央为只读画面，请重新连接。")
         elif status.reason in ("host_invalid", "aperture_invalid"):
             self._set_dock_message("窗口句柄尚未就绪：中央为只读画面，暂不打开透明开口。")
+        elif status.reason == "foreign_foreground":
+            self._set_dock_message("微信区域可能被其他窗口遮挡；点击助手窗口可恢复交互。")
         else:
             self._set_dock_message("窗口层级未确认：中央切换为只读画面，避免露出其他桌面内容。")
 
@@ -1461,7 +1585,9 @@ class MainWindow(QMainWindow):
             self._set_dock_message("微信已停靠 · 中央微信原生可交互")
             return
         self._close_aperture()
-        if health.state == "popup":
+        if health.reason == "foreign_foreground":
+            self._set_dock_message("微信区域可能被其他窗口遮挡；点击助手窗口可恢复交互。")
+        elif health.state == "popup":
             self._set_dock_message("微信弹窗覆盖聊天区域：中央切换为只读画面，请先关闭弹窗。")
         elif health.state == "minimized":
             self._set_dock_message("微信已最小化：中央为只读画面，返回聊天页后自动还原。")
@@ -1570,7 +1696,14 @@ class MainWindow(QMainWindow):
         self.nav_settings.setChecked(False)
         self.ai_toggle.hide()
         try:
+            # Refresh the stored profiles first; applying the live binding after
+            # refresh preserves the current conversation label and verified scope.
             self.history_page.refresh_people()
+            source = self._current_source()
+            live_title = (str(self._epoch_title or "").strip()
+                          if source is not None and self.state.ready else "")
+            live_scope = self._bound_scope() if live_title else None
+            self.history_page.set_live_conversation(live_title, live_scope)
         except OSError:
             self.history_page.status.setText("无法打开本地记忆库，请检查用户目录权限。")
 
@@ -1667,6 +1800,7 @@ class MainWindow(QMainWindow):
     def remember_chatgpt_model(self, slug):
         """Persist the ChatGPT model selection immediately (bug 4: model memory)."""
         self.config["chatgpt_model"] = str(slug)
+        self.config["model"] = str(slug)
         try:
             settings.remember_model("chatgpt_model", slug)
         except (OSError, ValueError, TypeError):
@@ -2169,7 +2303,7 @@ class MainWindow(QMainWindow):
     def inference_queue(self):
         if self._inference_queue is None:
             self._inference_queue = InferenceQueue(
-                _UiInferenceGateway(self), auto_start=True,
+                self._ui_gateway, auto_start=True,
                 dispatch=self._dispatch_queue_action)
         return self._inference_queue
 
@@ -2179,6 +2313,71 @@ class MainWindow(QMainWindow):
 
     def _dispatch_queue_action(self, action):
         self.bus.queue_event.emit(action)
+
+    def _start_history_analysis(self, scope):
+        """Start a scope-bound full-history job on the shared inference queue."""
+        if not backends.analysis_ready(self.config):
+            raise ValueError(backends.hint_for_analysis(self.config))
+        model = str(backends.effective_model(self.config) or "").strip()
+        backend = backends.analysis_backend(self.config)
+        if not model:
+            raise ValueError("请先在设置中读取并选择当前分析模型。")
+        profile_id = self._ui_gateway.register_history_profile(self.config)
+        if self._history_jobs is None:
+            self._history_analysis_store = AnalysisStore()
+            self._history_jobs = HistoryJobs(
+                self.history_page.store, self._history_analysis_store,
+                self._ui_gateway, queue=self.inference_queue,
+                model_version=f"{backend}:{model}", auto_start=True)
+        elif self._history_jobs.store is not self.history_page.store:
+            # A page/store replacement is only used by tests or explicit local
+            # recovery. Keep each HistoryJobs instance paired with its own store.
+            self._history_analysis_store = AnalysisStore()
+            self._history_jobs = HistoryJobs(
+                self.history_page.store, self._history_analysis_store,
+                self._ui_gateway, queue=self.inference_queue,
+                model_version=f"{backend}:{model}", auto_start=True)
+        else:
+            self._history_jobs.model_version = f"{backend}:{model}"
+        try:
+            job_id = self._history_jobs.start(scope, profile_id)
+        except Exception:
+            self._ui_gateway.discard_unreferenced_history_profile(profile_id)
+            raise
+        self._ui_gateway.retain_history_profile(profile_id, job_id)
+        return job_id
+
+    def _history_analysis_progress(self, job_id):
+        if self._history_jobs is None:
+            return None
+        return self._history_jobs.progress(job_id)
+
+    def _resume_history_analysis(self, job_id):
+        if self._history_jobs is None:
+            raise ValueError("历史分析任务不存在。")
+        job = self._history_jobs.analysis_store.get_job(job_id)
+        if job.profile_id not in self._ui_gateway._history_profiles:
+            raise ValueError("原模型配置未恢复，请重新开始分析。")
+        self._history_jobs.resume(job_id)
+
+    def _cancel_history_analysis(self, job_id):
+        if self._history_jobs is None:
+            raise ValueError("历史分析任务不存在。")
+        self._history_jobs.cancel(job_id)
+        # Read persisted job state directly: progress() validates the current
+        # source version and can raise after the user cancels a now-stale task.
+        return self._history_jobs.analysis_store.get_job(job_id)
+
+    def _finish_history_analysis(self, job_id, status):
+        if status in {"completed", "succeeded", "cancelled"}:
+            self._ui_gateway.release_history_profile(job_id)
+
+    def _history_analysis_report(self, job_id):
+        if self._history_jobs is None:
+            raise ValueError("历史分析任务不存在。")
+        job = self._history_jobs.analysis_store.get_job(job_id)
+        source_version = self._history_jobs.store.stats(job.scope).source_version
+        return self._history_jobs.report(job.scope, source_version)
 
     def _run_queue_action(self, action):
         if callable(action):
@@ -2381,6 +2580,71 @@ class MainWindow(QMainWindow):
             self.history_page.status.setText(f"已关联当前会话（版本 {binding.revision}）。")
         except (RuntimeError, AttributeError):
             pass
+
+    def _capture_history_import_context(self):
+        """Freeze verified live-chat identity before the file chooser/import starts."""
+        # Ensure a profile is selected before the native chooser opens; this
+        # stable application-owned ID is captured with the live session.
+        self.history_page.refresh_accounts()
+        account_id = self.history_page.active_account_id()
+        source = self._current_source()
+        title = str(self._epoch_title or "").strip()
+        live_ready = self._history_live_context_is_current(
+            source, self.conversation_epoch, title)
+        if live_ready:
+            scope = self._bound_scope()
+            self.history_page.set_live_conversation(title, scope)
+        else:
+            # History can remain open while realtime context changes. Clear any
+            # stale title/contact before opening the file chooser or confirmation.
+            self.history_page.set_live_conversation("")
+        if not live_ready:
+            return None
+        return (source, self.conversation_epoch, title, self.state.session, account_id)
+
+    def _history_live_context_is_current(self, source, epoch, title):
+        """Require a current OCR-confirmed snapshot, not stale/manual text."""
+        return bool(
+            source is not None
+            and source == self._current_source()
+            and epoch == self.conversation_epoch
+            and title
+            and title == str(self._epoch_title or "").strip()
+            and self.state.source_status == "live_ready"
+            and self.state.ready
+            and self.reading_snapshot_ready()
+            and not self.reading_busy
+            and self.pending_read is None
+        )
+
+    def _bind_imported_live_history(self, scope, context, created_for_live=False):
+        """Link a newly confirmed first-import profile only to its captured chat.
+
+        Import parsing can outlive a conversation/window switch. Never bind to the
+        *then-current* chat; require the exact source, epoch and confirmed title
+        captured when the user started importing.
+        """
+        if not created_for_live or context is None:
+            return False
+        try:
+            source, epoch, title, state_session, account_id = context
+        except (TypeError, ValueError):
+            return False
+        if (not account_id or scope.wechat_account_id != account_id
+                or self.history_page.active_account_id() != account_id):
+            self.history_page.status.setText(
+                "历史已导入，但本地微信资料已变化或不匹配，未关联当前会话。")
+            return False
+        if (state_session != self.state.session
+                or not self._history_live_context_is_current(source, epoch, title)):
+            self.history_page.status.setText(
+                "历史已导入，但当前微信会话已变化，未自动关联；请核对后手动关联。")
+            return False
+        binding = self.bindings.bind(source, epoch, scope)
+        self.history_page.set_live_conversation(title, scope)
+        self.history_page.status.setText(
+            f"已把导入档案关联到当前会话“{title}”（版本 {binding.revision}）。")
+        return True
 
     def _memory_context_text(self, text):
         scope = self._bound_scope()
@@ -2857,8 +3121,8 @@ class MainWindow(QMainWindow):
         title = ""
         if scope is not None:
             try:
-                people = self.history_page.store.list_people(
-                    self.history_page.account.text().strip() or "default")
+                people = self.history_page.store.list_people_in_account(
+                    scope.wechat_account_id) if scope is not None else []
                 title = next((person.display_name for person in people
                               if person.scope == scope), "")
             except Exception:  # noqa: BLE001 - optional history linkage
@@ -2883,6 +3147,175 @@ class MainWindow(QMainWindow):
             store.save(profile)
         except Exception:  # noqa: BLE001 - profile save must not break style flow
             return
+
+    @staticmethod
+    def _profile_field_text(value):
+        if isinstance(value, (list, tuple)):
+            items = [str(item).strip() for item in value if str(item).strip()]
+            return "、".join(items) or None
+        text = str(value or "").strip()
+        return text or None
+
+    def _scope_display_name(self, scope):
+        try:
+            people = self.history_page.store.list_people_in_account(
+                scope.wechat_account_id)
+            name = next((person.display_name for person in people
+                         if person.scope == scope), "")
+        except Exception:  # noqa: BLE001 - optional history linkage
+            name = ""
+        return name or self.current_contact_title() or "当前联系人"
+
+    def _scope_messages(self, scope):
+        """Fetch all imported messages for one contact (model chunking keeps memory bounded)."""
+        rows = []
+        offset = 0
+        store = self.history_page.store
+        while True:
+            page = store.list_messages(scope, offset=offset, limit=500)
+            if not page:
+                break
+            rows.extend({"sender": row.get("sender"), "text": row.get("text")}
+                        for row in page)
+            offset += len(page)
+        return rows
+
+    def start_model_profile_analysis(self, scope=None, *, automatic=False):
+        """Run model per-sentence affection + profile over the imported history."""
+        if self._model_busy:
+            self.set_notice("模型逐句分析正在进行，请等待当前任务完成。")
+            return None
+        scope = scope or self.history_page.current_scope()
+        if scope is None:
+            self.set_notice("请先在历史页导入并选择联系人，再启动模型逐句分析。")
+            return None
+        if backends.analysis_backend(self.config) not in ("api", "local"):
+            self.set_notice("模型逐句分析当前支持兼容 API/本地端点；请切换分析后端。")
+            return None
+        if not self.backend_ready():
+            self.set_notice("模型未就绪：请先在设置中填写 API Key 并选择可用模型。")
+            if not automatic:
+                self.open_settings()
+            return None
+        messages = self._scope_messages(scope)
+        if not messages:
+            self.set_notice("当前联系人还没有已导入的聊天记录。")
+            return None
+        title = self._scope_display_name(scope)
+        self._model_busy = True
+        self._model_progress_text = "准备模型逐句分析…"
+        self._model_cancel = CancellationToken()
+        cancel = self._model_cancel
+        self.set_notice(f"模型逐句分析 {title}：{len(messages)} 条记录，分块进行…")
+        if hasattr(self.history_page, "history_analysis_status"):
+            self.history_page.history_analysis_status.setText(
+                "正在按块调用模型判断情绪/意图/好感度；大文件会分块，不会一次塞满上下文。")
+        floating = getattr(self, "floating", None)
+        if floating is not None:
+            floating.refresh()
+        config = dict(self.config)
+
+        def work():
+            try:
+                from .model_affection import analyze_model_affection, analyze_model_profile
+                result = analyze_model_affection(
+                    config, messages,
+                    progress=lambda done, total, chars: self.bus.model_progress.emit(
+                        done, total, chars),
+                    cancel=cancel)
+                fields = {}
+                if result.chunk_summaries:
+                    try:
+                        fields = analyze_model_profile(
+                            config, title, result.chunk_summaries)
+                    except Exception:  # noqa: BLE001 - affection remains usable
+                        fields = {}
+                self.bus.model_done.emit(
+                    {"scope": scope, "title": title, "result": result,
+                     "fields": fields}, "")
+            except Exception as exc:  # noqa: BLE001 - UI thread reports readable error
+                self.bus.model_done.emit(None, str(exc) if isinstance(exc, ValueError)
+                                          else "模型逐句分析失败，请稍后重试。")
+
+        threading.Thread(target=work, daemon=True).start()
+        return True
+
+    def model_profile_progress(self, done, total, chars):
+        self._model_progress_text = f"模型逐句分析 {done}/{total} 块…（约 {chars} 字）"
+        self.analysis_status.setText(f"模型逐句分析 {done}/{total} 块")
+        floating = getattr(self, "floating", None)
+        if floating is not None:
+            floating.refresh()
+
+    def model_profile_done(self, payload, error):
+        self._model_busy = False
+        self._model_cancel = None
+        self._model_progress_text = ""
+        floating = getattr(self, "floating", None)
+        if error or not isinstance(payload, dict):
+            message = error or "模型逐句分析失败，请重试。"
+            self._model_progress_text = message
+            self.set_notice(message)
+            if hasattr(self.history_page, "history_analysis_status"):
+                self.history_page.history_analysis_status.setText(message)
+            if floating is not None:
+                floating.refresh()
+            return
+        scope = payload.get("scope")
+        title = payload.get("title") or "当前联系人"
+        result = payload.get("result")
+        fields = payload.get("fields") or {}
+        if scope is None or result is None:
+            self.set_notice("模型逐句分析没有返回有效结果。")
+            return
+        try:
+            from .contact_profile import ContactProfile, ContactProfileStore
+            store = getattr(self, "_contact_profiles", None)
+            if store is None:
+                store = ContactProfileStore(settings.data_dir())
+                self._contact_profiles = store
+            profile = store.get(title, scope.person_id)
+            if profile is None:
+                profile = ContactProfile(title=title, scope_person_id=scope.person_id)
+            for field in ("relation", "topics", "preferences", "taboos",
+                          "reply_style", "important_dates", "persona"):
+                value = self._profile_field_text(fields.get(field))
+                if value:
+                    setattr(profile, field, value)
+            profile.affection_score = float(result.score)
+            profile.model_analyzed = True
+            profile.favorite = self.is_favorite_contact(title)
+            store.save(profile)
+            self._model_result = result
+            detail = (f"模型档案已更新：好感度 {result.score}，"
+                      f"{result.completed_chunks}/{result.chunk_count} 块完成")
+            if getattr(result, "partial", False):
+                detail += f"，{result.failed_chunks} 块失败（已保留部分结果）"
+            if getattr(result, "cancelled", False):
+                detail += "（已取消，保留部分结果）"
+            self._model_progress_text = detail
+            self.set_notice(detail + "；逐句情绪/意图判断仅作参考。")
+            if hasattr(self.history_page, "history_analysis_status"):
+                self.history_page.history_analysis_status.setText(detail)
+        except Exception as exc:  # noqa: BLE001 - saving must not close the UI
+            self.set_notice(f"模型分析完成，但档案保存失败：{exc}")
+        if floating is not None:
+            floating.refresh()
+
+    def _history_import_completed(self, scope):
+        """After an import: local profile already exists; auto-run model analysis."""
+        floating = getattr(self, "floating", None)
+        if floating is not None:
+            floating.refresh()
+        if not self.config.get("auto_model_profile", True):
+            return
+        if backends.analysis_backend(self.config) not in ("api", "local"):
+            return
+        if not self.backend_ready():
+            self.set_notice("历史已导入并生成基础档案；填写模型 Key 后可自动逐句分析。")
+            return
+        QTimer.singleShot(150, lambda: self.start_model_profile_analysis(
+            scope, automatic=True))
 
     def _show_style_profile_dialog(self, profile):
         dialog = StyleProfileDialog(profile, self)

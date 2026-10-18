@@ -18,6 +18,17 @@ class RememberModelTests(unittest.TestCase):
         self.assertEqual(restored.get("chatgpt_model"), "gpt-6.1-sol")
         self.assertEqual(restored.get("api_key"), "sk-test-placeholder-key")
 
+    def test_chatgpt_choice_updates_active_model_for_restart(self):
+        with tempfile.TemporaryDirectory() as folder:
+            cfg = settings.load(folder)
+            cfg.update(backend="chatgpt", model="gpt-6.1-sol",
+                       chatgpt_model="gpt-6.1-sol")
+            settings.save(cfg, folder)
+            settings.remember_model("chatgpt_model", "gpt-6-astra", folder)
+            restored = settings.load(folder)
+        self.assertEqual(restored["chatgpt_model"], "gpt-6-astra")
+        self.assertEqual(restored["model"], "gpt-6-astra")
+
     def test_unknown_field_is_rejected(self):
         with tempfile.TemporaryDirectory() as folder:
             with self.assertRaises(ValueError):

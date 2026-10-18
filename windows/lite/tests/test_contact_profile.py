@@ -239,6 +239,66 @@ class EncryptionTests(StoreTestCase):
         self.assertEqual(store.get("田子夜").style_prompt, "专属风格提示：温和、直接。")
 
 
+class ExtendedProfileTests(StoreTestCase):
+    def test_new_profile_fields_roundtrip(self):
+        self.store.save(self.profile(
+            relation="客户/采购负责人", topics="预算与价格（3 条）；来源：HTML 1 个、PDF 1 个",
+            preferences="喜欢先看报价单", taboos="不要打电话，先发微信",
+            reply_style="简短、直接、礼貌", important_dates="生日：5月20日；纪念日：6月1日",
+            persona="合成画像摘要", model_analyzed=True))
+        reloaded = self.store.get("田子夜")
+        self.assertEqual(reloaded.relation, "客户/采购负责人")
+        self.assertIn("预算与价格", reloaded.topics)
+        self.assertEqual(reloaded.preferences, "喜欢先看报价单")
+        self.assertEqual(reloaded.taboos, "不要打电话，先发微信")
+        self.assertEqual(reloaded.reply_style, "简短、直接、礼貌")
+        self.assertIn("生日", reloaded.important_dates)
+        self.assertEqual(reloaded.persona, "合成画像摘要")
+        self.assertIs(reloaded.model_analyzed, True)
+
+    def test_new_fields_default_to_none_and_not_analyzed(self):
+        profile = ContactProfile(title="仅标题")
+        self.assertIsNone(profile.relation)
+        self.assertIsNone(profile.topics)
+        self.assertIsNone(profile.preferences)
+        self.assertIsNone(profile.taboos)
+        self.assertIsNone(profile.reply_style)
+        self.assertIsNone(profile.important_dates)
+        self.assertIs(profile.model_analyzed, False)
+        for key in ("relation", "topics", "preferences", "taboos", "reply_style",
+                    "important_dates", "model_analyzed"):
+            self.assertIn(key, profile.as_dict())
+
+    def test_old_payload_without_new_fields_is_readable(self):
+        legacy = {
+            "schema_version": 1,
+            "kind": "contact_profile",
+            "title": "旧档案联系人",
+            "scope_person_id": None,
+            "style_prompt": "旧风格提示",
+            "display_report": "旧报告",
+            "persona": "旧画像",
+            "affection_score": 0.4,
+            "updated_at": "2026-01-01T00:00:00",
+            "favorite": True,
+        }
+        profile = ContactProfile.from_dict(legacy)
+        self.assertEqual(profile.title, "旧档案联系人")
+        self.assertIsNone(profile.relation)
+        self.assertIsNone(profile.topics)
+        self.assertIsNone(profile.preferences)
+        self.assertIsNone(profile.taboos)
+        self.assertIsNone(profile.reply_style)
+        self.assertIsNone(profile.important_dates)
+        self.assertIs(profile.model_analyzed, False)
+        # 旧档案保存后仍可按旧字段读回，新字段保持 None。
+        self.store.save(profile)
+        reloaded = self.store.get("旧档案联系人")
+        self.assertEqual(reloaded.persona, "旧画像")
+        self.assertTrue(reloaded.favorite)
+        self.assertIs(reloaded.model_analyzed, False)
+
+
 class ProfileFromStyleTests(unittest.TestCase):
     def test_duck_typed_style_profile(self):
         style = SimpleNamespace(prompt_style="提示词风格", display_report="用户报告")

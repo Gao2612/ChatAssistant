@@ -424,34 +424,31 @@ class HistoryJobs:
         return job.job_id
 
     def pause(self, job_id: str) -> None:
-        job = self.analysis_store.get_job(job_id)
-        if job.status in ("completed", "cancelled"):
-            return
-        self.analysis_store.update_job(job_id, status="paused",
-                                       message="已暂停，可随时继续。")
+        self.analysis_store.pause_job(job_id, "已暂停，可随时继续。")
 
     def resume(self, job_id: str) -> None:
         job = self.analysis_store.get_job(job_id)
         if job.status in ("completed", "cancelled"):
             return
         self.analysis_store.reset_failed_batches(job_id)
-        self.analysis_store.update_job(job_id, status="running", message="")
+        job = self.analysis_store.resume_job(job_id)
+        if job.status != "running":
+            return
         with self._lock:
             if job_id not in self._known:
                 self._known.append(job_id)
             self._tokens[job_id] = CancellationToken()
         self._ensure_worker(job_id)
 
-    def cancel(self, job_id: str) -> None:
+    def cancel(self, job_id: str) -> AnalysisJob:
         job = self.analysis_store.get_job(job_id)
         if job.status in ("completed", "cancelled"):
-            return
+            return job
         with self._lock:
             token = self._tokens.get(job_id)
         if token is not None:
             token.cancel()
-        self.analysis_store.update_job(job_id, status="cancelled",
-                                       message="任务已取消。")
+        return self.analysis_store.cancel_job(job_id)
 
     def progress(self, job_id: str) -> JobProgress:
         job = self.analysis_store.get_job(job_id)
@@ -556,7 +553,7 @@ class HistoryJobs:
                 except AnalysisJobError:
                     return
                 if job.status == "pending":
-                    job = self.analysis_store.update_job(job_id, status="running")
+                    job = self.analysis_store.start_job(job_id)
                 if job.status != "running":
                     return
                 if job.stage == "extract":
@@ -575,7 +572,9 @@ class HistoryJobs:
     def _extract_one(self, job: AnalysisJob) -> bool:
         batch = self.analysis_store.next_pending_batch(job.job_id)
         if batch is None:
-            self.analysis_store.update_job(job.job_id, stage="reduce")
+            self.analysis_store.transition_job(
+                job.job_id, expected_statuses=("running",),
+                status="running", stage="reduce")
             return True
         try:
             records = list(self.store.iter_records(job.scope, job.source_version))
@@ -584,38 +583,34 @@ class HistoryJobs:
                 raise HistoryJobError("批次计划与冻结来源版本不一致，请重新开始分析。")
             plan = plans[batch.batch_index]
             items = self._extract_plan(job, plan)
+            self._token(job.job_id).raise_if_cancelled()
         except CancelledError:
-            self.analysis_store.update_job(job.job_id, status="cancelled",
-                                           message="任务已取消。")
+            self.analysis_store.cancel_job(job.job_id)
             return False
         except StaleSourceVersionError:
-            self.analysis_store.update_job(
-                job.job_id, status="paused",
-                message="来源版本已变化，旧分析已失效，请重新开始分析。")
+            self.analysis_store.pause_job(
+                job.job_id, "来源版本已变化，旧分析已失效，请重新开始分析。")
             return False
         except InferenceQuotaError:
             self.analysis_store.mark_batch_failed(job.job_id, batch.batch_index, "quota")
-            self.analysis_store.update_job(
-                job.job_id, status="paused",
-                message="模型额度受限，任务已暂停；恢复后可继续未完成批次。")
+            self.analysis_store.pause_job(
+                job.job_id, "模型额度受限，任务已暂停；恢复后可继续未完成批次。")
             return False
         except InferenceAuthError:
             self.analysis_store.mark_batch_failed(job.job_id, batch.batch_index, "auth")
-            self.analysis_store.update_job(
-                job.job_id, status="paused",
-                message="模型授权已失效，请重新连接账号后继续。")
+            self.analysis_store.pause_job(
+                job.job_id, "模型授权已失效，请重新连接账号后继续。")
             return False
         except BaseException as exc:  # noqa: BLE001 - recorded as batch failure
             code = type(exc).__name__
             self.analysis_store.mark_batch_failed(job.job_id, batch.batch_index, code)
-            self.analysis_store.update_job(
-                job.job_id, status="paused",
-                message=f"第 {batch.batch_index + 1} 批分析失败（{code}），恢复后只重试未完成批次。")
+            self.analysis_store.pause_job(
+                job.job_id,
+                f"第 {batch.batch_index + 1} 批分析失败（{code}），恢复后只重试未完成批次。")
             return False
         covered = tuple((item.record_id, item.start, item.end) for item in plan.items)
-        self.analysis_store.complete_batch(job.job_id, batch.batch_index,
-                                           covered=covered, items=items)
-        return True
+        return self.analysis_store.complete_batch(
+            job.job_id, batch.batch_index, covered=covered, items=items)
 
     def _extract_plan(self, job: AnalysisJob,
                       plan: BatchPlan) -> list[tuple[str, str, tuple[tuple[str, int, int], ...]]]:
@@ -663,30 +658,23 @@ class HistoryJobs:
                     raise HistoryJobError("模型报告条目缺少证据引用，已拒绝发布。")
                 payload_items.append({"category": row["category"],
                                       "text": row["text"], "evidence": evidence})
-            self.analysis_store.save_report(job.job_id, {
+            self.analysis_store.save_report_and_complete(job.job_id, {
                 "summary": summary, "items": payload_items, "timeline": []})
-            self.analysis_store.update_job(job.job_id, status="completed",
-                                           stage="done", message="")
         except CancelledError:
-            self.analysis_store.update_job(job.job_id, status="cancelled",
-                                           message="任务已取消。")
+            self.analysis_store.cancel_job(job.job_id)
         except StaleSourceVersionError:
-            self.analysis_store.update_job(
-                job.job_id, status="paused",
-                message="来源版本已变化，旧分析已失效，请重新开始分析。")
+            self.analysis_store.pause_job(
+                job.job_id, "来源版本已变化，旧分析已失效，请重新开始分析。")
         except InferenceQuotaError:
-            self.analysis_store.update_job(
-                job.job_id, status="paused",
-                message="模型额度受限，档案合并阶段已暂停；恢复后重试。")
+            self.analysis_store.pause_job(
+                job.job_id, "模型额度受限，档案合并阶段已暂停；恢复后重试。")
         except InferenceAuthError:
-            self.analysis_store.update_job(
-                job.job_id, status="paused",
-                message="模型授权已失效，请重新连接账号后继续。")
+            self.analysis_store.pause_job(
+                job.job_id, "模型授权已失效，请重新连接账号后继续。")
         except BaseException as exc:  # noqa: BLE001 - job pause with diagnostic
             code = type(exc).__name__
-            self.analysis_store.update_job(
-                job.job_id, status="paused",
-                message=f"档案合并失败（{code}），恢复后重试。")
+            self.analysis_store.pause_job(
+                job.job_id, f"档案合并失败（{code}），恢复后重试。")
 
     @staticmethod
     def _dedupe_items(items: Iterable[StoredItem]) -> list[dict]:

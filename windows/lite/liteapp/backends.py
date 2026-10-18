@@ -88,12 +88,15 @@ def effective_model(config):
     backend = analysis_backend(config)
     if backend == "chatgpt":
         catalog = [slug for _name, slug in config.get("subscription_models", [])]
+        remembered = remembered_model(config, "chatgpt")
+        if remembered:
+            # An explicitly remembered choice outranks the legacy active-model
+            # field. If it disappeared from the refreshed catalog, require the
+            # user to choose again instead of silently switching models.
+            return remembered if remembered in catalog else ""
         current = (config.get("model") or "").strip()
         if current in catalog:
             return current
-        remembered = remembered_model(config, "chatgpt")
-        if remembered in catalog:
-            return remembered
         return catalog[0] if catalog else ""
     return remembered_model(config, backend)
 
@@ -180,6 +183,8 @@ def validate_reading(config):
             raise ValueError("远程视觉接口需要读取 API Key。")
         return
     if backend == "codex":
+        if not (config.get("reading_model") or "").strip():
+            raise ValueError("请先从 Codex 图像模型列表中明确选择读取模型。")
         explicit = (config.get("codex_path") or "").strip()
         if explicit and not codex_backend.find_codex(config):
             raise ValueError("填写的 Codex 路径无效，请检查 codex.exe 位置。")

@@ -28,6 +28,9 @@ DEFAULTS = {
     # Only these conversation titles are auto-analysed; other contacts require
     # pressing the analysis button.
     "favorite_contacts": [],
+    # After an HTML/PDF import, start the chunked per-sentence model profile
+    # analysis automatically when the configured backend is ready.
+    "auto_model_profile": True,
     # Reading backends: ocr (local, offline), api (multimodal vision API),
     # codex (official app-server image input). Reading and analysis are independent.
     "reading_backend": "ocr", "reading_base_url": "", "reading_model": "",
@@ -177,6 +180,11 @@ def remember_model(field, value, folder=None):
     with account_store.folder_lock(dest):
         raw = read_raw(dest) or {}
         raw[field] = str(value)
+        if field == "chatgpt_model":
+            # ``model`` is the active backend's compatibility field. Keep it in
+            # sync for older consumers, or a stale valid catalog ID can override
+            # the newly remembered ChatGPT choice after restart.
+            raw["model"] = str(value)
         write_raw(raw, dest)
     return str(value)
 

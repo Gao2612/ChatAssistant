@@ -19,6 +19,39 @@ class HistoryStoreTests(unittest.TestCase):
         # T5：历史数据 V2 的所有读写都必须携带 ScopeKey。
         self.scope = self.store.create_person("示例客户", "account-a")
 
+    def test_explicit_account_profiles_keep_identity_and_isolate_contacts(self):
+        profiles = self.store.list_accounts()
+        legacy = next(profile for profile in profiles
+                      if profile.account_id == self.scope.wechat_account_id)
+        self.assertTrue(legacy.legacy)
+        self.assertEqual(legacy.label, "account-a")
+
+        account = self.store.create_account("工作微信")
+        self.assertFalse(account.legacy)
+        contact = self.store.create_person_in_account(account.account_id, "同名客户")
+        self.assertEqual(contact.wechat_account_id, account.account_id)
+        account_people = self.store.list_people_in_account(account.account_id)
+        self.assertEqual(len(account_people), 1)
+        self.assertEqual(account_people[0].scope, contact)
+        self.assertEqual(self.store.list_people_in_account(
+            self.scope.wechat_account_id)[0].scope, self.scope)
+
+        renamed = self.store.rename_account(account.account_id, "个人微信")
+        self.assertEqual(renamed.account_id, account.account_id)
+        self.assertEqual(renamed.label, "个人微信")
+        self.assertFalse(renamed.legacy)
+        self.assertEqual(self.store.list_people_in_account(account.account_id)[0].scope,
+                         contact)
+
+    def test_explicit_account_profile_rejects_duplicate_or_legacy_rename(self):
+        account = self.store.create_account("工作微信")
+        with self.assertRaises(ValueError):
+            self.store.create_account(" 工作微信 ")
+        legacy = next(profile for profile in self.store.list_accounts()
+                      if profile.account_id == self.scope.wechat_account_id)
+        with self.assertRaises(ValueError):
+            self.store.rename_account(legacy.account_id, "旧数据")
+
     def test_html_import_is_local_plain_text_and_repeat_is_idempotent(self):
         html = self.folder / "sample.html"
         html.write_text(

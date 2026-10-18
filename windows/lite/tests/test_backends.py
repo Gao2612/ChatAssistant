@@ -91,9 +91,12 @@ class ReadinessTests(unittest.TestCase):
         self.assertFalse(backends.reading_ready(dict(vision, reading_api_key="")))
         self.assertFalse(backends.reading_ready(dict(vision, reading_model="")))
         with patch.object(codex_backend, "available", return_value=True):
-            self.assertTrue(backends.reading_ready({"reading_backend": "codex"}))
-        with patch.object(codex_backend, "available", return_value=False):
             self.assertFalse(backends.reading_ready({"reading_backend": "codex"}))
+            self.assertTrue(backends.reading_ready({"reading_backend": "codex",
+                                                    "reading_model": "fake-vision"}))
+        with patch.object(codex_backend, "available", return_value=False):
+            self.assertFalse(backends.reading_ready({"reading_backend": "codex",
+                                                     "reading_model": "fake-vision"}))
 
     def test_analysis_ready_matrix(self):
         self.assertFalse(backends.analysis_ready({"backend": "chatgpt"}))

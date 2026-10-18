@@ -169,6 +169,10 @@ class FloatingAssistant(QWidget):
         self.profile_label.setObjectName("floatMuted")
         self.profile_label.setWordWrap(True)
         panel.addWidget(self.profile_label)
+        self.model_label = QLabel("模型档案：待分析")
+        self.model_label.setObjectName("floatMuted")
+        self.model_label.setWordWrap(True)
+        panel.addWidget(self.model_label)
 
         self.status_label = QLabel("等待微信窗口")
         self.status_label.setObjectName("floatMuted")
@@ -179,6 +183,10 @@ class FloatingAssistant(QWidget):
         self.analyze_button.setObjectName("floatPrimary")
         self.analyze_button.clicked.connect(self._analyze)
         panel.addWidget(self.analyze_button)
+        self.model_button = QPushButton("模型分析档案")
+        self.model_button.setToolTip("对已导入的完整历史分块调用模型，逐句判断情绪/意图并生成档案")
+        self.model_button.clicked.connect(self._model_analyze)
+        panel.addWidget(self.model_button)
 
         self.reply_labels, self.copy_buttons, self.send_buttons = [], [], []
         for index in range(3):
@@ -252,12 +260,36 @@ class FloatingAssistant(QWidget):
             profile = None
             if hasattr(host, "contact_profile_for_current"):
                 profile = host.contact_profile_for_current()
-            if profile is not None and (profile.style_prompt or profile.display_report):
-                self.profile_label.setText("专属档案：已生成（历史页可查看风格/画像）")
+            profile_parts = []
+            if profile is not None:
+                if profile.relation:
+                    profile_parts.append(f"关系：{profile.relation}")
+                if profile.topics:
+                    profile_parts.append(f"话题：{profile.topics}")
+                if profile.preferences:
+                    profile_parts.append(f"偏好：{profile.preferences}")
+                if profile.taboos:
+                    profile_parts.append(f"禁忌：{profile.taboos}")
+                if profile.important_dates:
+                    profile_parts.append(f"日期：{profile.important_dates}")
+            if profile_parts:
+                prefix = "模型档案" if getattr(profile, "model_analyzed", False) else "基础档案"
+                self.profile_label.setText(prefix + " · " + "；".join(profile_parts))
             elif profile is not None:
-                self.profile_label.setText("专属档案：已建立，等待生成风格")
+                self.profile_label.setText("专属档案：已建立，等待生成画像")
             else:
-                self.profile_label.setText("专属档案：未生成（历史页导入后生成）")
+                self.profile_label.setText("专属档案：未生成（导入后自动建立）")
+            model_text = ""
+            if getattr(host, "_model_busy", False):
+                model_text = getattr(host, "_model_progress_text", "") or "模型逐句分析进行中…"
+            elif getattr(host, "_model_progress_text", ""):
+                model_text = host._model_progress_text
+            elif profile is not None and getattr(profile, "model_analyzed", False):
+                model_text = "模型档案：已逐句分析"
+            else:
+                model_text = "模型档案：待分析（导入后自动分块分析）"
+            self.model_label.setText(model_text)
+            self.model_button.setEnabled(not getattr(host, "_model_busy", False))
             self.ball.set_state(score, favorite)
             for index, label in enumerate(self.reply_labels):
                 text = host.reply_boxes[index].text() if index < len(host.reply_boxes) else ""
@@ -311,6 +343,12 @@ class FloatingAssistant(QWidget):
         try:
             self.host.start_analysis()
         except RuntimeError:
+            return
+
+    def _model_analyze(self):
+        try:
+            self.host.start_model_profile_analysis()
+        except (RuntimeError, AttributeError):
             return
 
     def _copy(self, index):

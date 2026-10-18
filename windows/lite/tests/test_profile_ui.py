@@ -443,10 +443,11 @@ class HistoryPageMainFlowTests(UiTestCase):
         page.refresh_people()
         return page
 
-    def test_main_flow_is_current_contact_plus_import_without_account_input(self):
+    def test_main_flow_uses_explicit_profile_selector_not_free_text_account_input(self):
         page = self._page()
         self.assertFalse(page.account.isVisible(), "账号选择应移出历史主流程")
-        self.assertIn("账号", page.account_hint.text())
+        self.assertFalse(page.account_profiles.isHidden())
+        self.assertIn("旧/未区分", page.account_hint.text())
         self.assertIsNotNone(page.other_person_button)
         self.assertEqual([page.tabs.tabText(index) for index in range(page.tabs.count())],
                          ["原文", "档案", "趋势", "统计", "任务"])

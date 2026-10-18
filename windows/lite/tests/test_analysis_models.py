@@ -122,6 +122,15 @@ def subscription_config(**overrides):
 
 
 class BackendMemoryTests(unittest.TestCase):
+    def test_codex_reading_requires_explicit_model_selection(self):
+        config = subscription_config(reading_backend="codex", reading_model="",
+                                     codex_path="codex")
+        with patch("liteapp.backends.codex_backend.find_codex", return_value="codex"):
+            with self.assertRaisesRegex(ValueError, "读取模型"):
+                backends.validate_reading(config)
+        with patch("liteapp.reading.codex_backend.available", return_value=True):
+            self.assertFalse(backends.reading_ready(config))
+
     def test_each_backend_remembers_its_own_model(self):
         config = subscription_config(backend="api")
         self.assertEqual(backends.remembered_model(config, "api"), "vendor-chat")
@@ -130,7 +139,9 @@ class BackendMemoryTests(unittest.TestCase):
         self.assertEqual(backends.remembered_model(config, "codex"), "gpt-6-sol")
 
     def test_effective_model_recovers_saved_chatgpt_choice(self):
-        config = subscription_config(model="vendor-chat", chatgpt_model="gpt-6-astra")
+        # The generic field can still contain a different valid ChatGPT model after
+        # a dropdown choice was remembered without pressing Save.
+        config = subscription_config(model="gpt-6.1-sol", chatgpt_model="gpt-6-astra")
         self.assertEqual(backends.effective_model(config), "gpt-6-astra")
         self.assertTrue(backends.analysis_ready(config))
         self.assertIn("ChatGPT / gpt-6-astra", backends.describe_analysis(config))
@@ -172,6 +183,25 @@ class SettingsPageBindingTests(unittest.TestCase):
         self.app.processEvents()
         self.assertEqual(page.model.currentData(), "gpt-6.1-sol")
         self.assertTrue(page.chatgpt_state.text().startswith("已连接 ChatGPT"))
+        page.close()
+
+    def test_chatgpt_model_selection_updates_effective_model_before_save(self):
+        page = SettingsPage(subscription_config(backend="chatgpt"), None)
+        page.set_models(GPT_MODELS)
+        page.model.setCurrentIndex(1)
+        self.app.processEvents()
+        self.assertEqual(page.config["chatgpt_model"], "gpt-6-astra")
+        self.assertEqual(page.config["model"], "gpt-6-astra")
+        self.assertEqual(backends.effective_model(page.config), "gpt-6-astra")
+        self.assertIn("gpt-6-astra", page.effective_label.text())
+        page.close()
+
+    def test_stale_chatgpt_model_is_not_silently_replaced(self):
+        page = SettingsPage(subscription_config(
+            backend="chatgpt", chatgpt_model="removed-model"), None)
+        page.set_models(GPT_MODELS)
+        self.assertEqual(page.model.currentIndex(), -1)
+        self.assertEqual(backends.effective_model(page.config), "")
         page.close()
 
     def test_commit_saves_provider_and_per_backend_model(self):
@@ -220,6 +250,13 @@ class MainWindowBindingTests(unittest.TestCase):
     def test_header_shows_effective_backend_and_model_after_restart(self):
         self.assertIn("ChatGPT / gpt-6.1-sol", self.window.effective_label.text())
         self.assertTrue(self.window.backend_ready())
+
+    def test_immediate_chatgpt_choice_updates_effective_request_model(self):
+        with patch("liteapp.ui.settings.remember_model") as remember:
+            self.window.remember_chatgpt_model("gpt-6-astra")
+        self.assertEqual(self.window.config["model"], "gpt-6-astra")
+        self.assertEqual(backends.effective_model(self.window.config), "gpt-6-astra")
+        remember.assert_called_once_with("chatgpt_model", "gpt-6-astra")
 
     def test_restart_with_api_model_field_still_uses_remembered_gpt_model(self):
         config = subscription_config(backend="chatgpt", model="vendor-chat",

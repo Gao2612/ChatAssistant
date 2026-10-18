@@ -21,9 +21,20 @@ class CatalogRegressionTests(unittest.TestCase):
     def test_api_catalog_saves_id_instead_of_display_name(self):
         page = self.page(backend='api')
         page.models_checked([('Vendor Friendly Name', 'vendor-supported-id')], '')
+        page.model.setCurrentIndex(page.model.findData('vendor-supported-id'))
         with patch('liteapp.ui.settings.save') as save:
             page.commit()
         self.assertEqual(save.call_args[0][0]['model'], 'vendor-supported-id')
+
+    def test_legacy_display_name_does_not_silently_select_first_api_model(self):
+        # Older settings could persist a UI label instead of the endpoint's ID.
+        # Refreshing /models must not guess that the first result is its replacement.
+        page = self.page(backend='api', api_model='Friendly display label')
+        page.models_checked([('Friendly display label', 'real-model-id'),
+                             ('Another model', 'another-id')], '')
+        self.assertEqual(page.model.currentText(), '')
+        self.assertEqual(page.model.currentData(), None)
+        self.assertIn('选择', page.model_status.text())
 
     def test_switching_backend_clears_foreign_catalog(self):
         page = self.page()
@@ -53,6 +64,22 @@ class CatalogRegressionTests(unittest.TestCase):
         page = self.page(reading_backend='api')
         self.assertIsInstance(page.reading_model, QComboBox)
         self.assertTrue(page.fetch_reading_models_button.isEnabled())
+
+    def test_codex_reading_requires_catalog_selection(self):
+        page = self.page(reading_backend='codex', reading_model='stale-id')
+        self.assertFalse(page.reading_model.isEditable())
+        self.assertEqual(page.reading_model.currentText(), '')
+        page.codex_checked({'models': [
+            {'id': 'text-only', 'display_name': 'Text only', 'input_modalities': ['text']},
+            {'id': 'vision-id', 'display_name': 'Vision', 'input_modalities': ['text', 'image']},
+        ]}, '')
+        self.assertEqual([page.reading_model.itemData(i)
+                          for i in range(page.reading_model.count())], ['vision-id'])
+        self.assertEqual(page.reading_model.currentIndex(), -1)
+        page.reading_model.setCurrentIndex(0)
+        with patch('liteapp.ui.settings.save') as save:
+            page.commit()
+        self.assertEqual(save.call_args[0][0]['reading_model'], 'vision-id')
 
     def test_codex_catalog_preserves_selected_id(self):
         page = self.page(backend='codex', codex_model='second')
@@ -91,6 +118,7 @@ class CatalogRegressionTests(unittest.TestCase):
     def test_effective_label_uses_selected_id(self):
         page = self.page(backend='api')
         page.models_checked([('Friendly', 'new-supported-id')], '')
+        page.model.setCurrentIndex(page.model.findData('new-supported-id'))
         self.assertIn('new-supported-id', page.effective_label.text())
 
     def test_reading_catalog_saves_id(self):
@@ -100,6 +128,17 @@ class CatalogRegressionTests(unittest.TestCase):
         with patch('liteapp.ui.settings.save') as save:
             page.commit()
         self.assertEqual(save.call_args[0][0]['reading_model'], 'vision-id')
+
+    def test_legacy_reading_display_name_does_not_select_first_model(self):
+        page = self.page(reading_backend='api', reading_model='Friendly vision name',
+                         reading_base_url='https://vision.example/v1',
+                         reading_api_key='synthetic')
+        context = (page._reading_request, 'api', page.reading_base.text(), page.reading_key.text())
+        page.reading_models_checked((context, [('Friendly vision name', 'vision-id'),
+                                               ('Other', 'other-id')]), '')
+        self.assertEqual(page.reading_model.currentText(), '')
+        self.assertEqual(page.reading_model.currentData(), None)
+        self.assertIn('选择', page.reading_model_status.text())
 
     def test_missing_saved_codex_model_requires_explicit_selection(self):
         page = self.page(backend='codex', codex_model='removed-id')

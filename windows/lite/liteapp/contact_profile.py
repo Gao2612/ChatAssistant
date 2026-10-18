@@ -81,6 +81,24 @@ def _optional_text(value: Any, label: str) -> str | None:
     return value if value else None
 
 
+def _optional_profile_value(value: Any, label: str) -> Any:
+    """档案内容字段兼容字符串或字符串列表（旧/新 UI/模型输出都可读）。"""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value if value else None
+    if isinstance(value, (list, tuple)):
+        items: list[str] = []
+        for item in value:
+            if item is None:
+                continue
+            text = str(item).strip()
+            if text:
+                items.append(text)
+        return items or None
+    raise TypeError(f"{label} 必须是字符串、字符串列表或 None。")
+
+
 def _scope_person_id(scope: Any) -> str | None:
     """从 ScopeKey/显式 person_id/None 提取稳定的 scope_person_id。"""
     if scope is None:
@@ -97,7 +115,14 @@ def _scope_person_id(scope: Any) -> str | None:
 
 @dataclass
 class ContactProfile:
-    """一位联系人的专属档案；标题是显示/查找键，scope 才是身份。"""
+    """一位联系人的专属档案；标题是显示/查找键，scope 才是身份。
+
+    字段分两类：身份/持久元信息（title/scope/affection/updated_at/favorite/
+    model_analyzed）与可读档案内容（style/report/persona/relation/topics/
+    preferences/taboos/reply_style/important_dates）。新需求（2026-10-18）在
+    旧字段后追加的档案内容字段全部可选，旧文件缺失时读成 None，模型分析完成
+    后由调用方写回并把 ``model_analyzed`` 置 True。
+    """
 
     title: str
     scope_person_id: str | None = None
@@ -107,6 +132,13 @@ class ContactProfile:
     affection_score: float | None = None
     updated_at: str = ""
     favorite: bool = False
+    relation: str | None = None
+    topics: str | list[str] | None = None
+    preferences: str | list[str] | None = None
+    taboos: str | list[str] | None = None
+    reply_style: str | None = None
+    important_dates: str | list[str] | None = None
+    model_analyzed: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.title, str):
@@ -127,6 +159,14 @@ class ContactProfile:
             raise TypeError("updated_at 必须是字符串。")
         self.updated_at = self.updated_at.strip()
         self.favorite = bool(self.favorite)
+        self.relation = _optional_text(self.relation, "relation")
+        self.topics = _optional_profile_value(self.topics, "topics")
+        self.preferences = _optional_profile_value(self.preferences, "preferences")
+        self.taboos = _optional_profile_value(self.taboos, "taboos")
+        self.reply_style = _optional_text(self.reply_style, "reply_style")
+        self.important_dates = _optional_profile_value(self.important_dates,
+                                                       "important_dates")
+        self.model_analyzed = bool(self.model_analyzed)
 
     def as_dict(self) -> dict[str, Any]:
         """JSON-safe payload（只应由 ContactProfileStore 加密落盘）。"""
@@ -141,6 +181,13 @@ class ContactProfile:
             "affection_score": self.affection_score,
             "updated_at": self.updated_at,
             "favorite": self.favorite,
+            "relation": self.relation,
+            "topics": self.topics,
+            "preferences": self.preferences,
+            "taboos": self.taboos,
+            "reply_style": self.reply_style,
+            "important_dates": self.important_dates,
+            "model_analyzed": self.model_analyzed,
         }
 
     @classmethod
@@ -163,6 +210,14 @@ class ContactProfile:
             affection_score=payload.get("affection_score"),
             updated_at=str(payload.get("updated_at") or ""),
             favorite=bool(payload.get("favorite", False)),
+            # 旧档案没有这些键：如实读成 None/False，不伪造分析结果。
+            relation=payload.get("relation"),
+            topics=payload.get("topics"),
+            preferences=payload.get("preferences"),
+            taboos=payload.get("taboos"),
+            reply_style=payload.get("reply_style"),
+            important_dates=payload.get("important_dates"),
+            model_analyzed=bool(payload.get("model_analyzed", False)),
         )
 
 

@@ -32,6 +32,7 @@ __all__ = [
     "HistoryError",
     "HistoryImportError",
     "HistoryRecord",
+    "HistoryAccount",
     "ImportResult",
     "ImportSource",
     "ImportedRecord",
@@ -316,6 +317,21 @@ class PersonInfo:
     @property
     def scope(self) -> ScopeKey:
         return ScopeKey(self.account_id, self.person_id)
+
+
+@dataclass(frozen=True)
+class HistoryAccount:
+    """An app-owned local history bucket; label is display-only metadata."""
+
+    account_id: str
+    label: str
+    legacy: bool = False
+
+    def __post_init__(self) -> None:
+        _require_text(self.account_id, "account_id", 128)
+        _require_text(self.label, "label", MAX_LABEL_CHARS)
+        if not isinstance(self.legacy, bool):
+            raise TypeError("legacy 必须是 bool。")
 
 
 @dataclass(frozen=True)

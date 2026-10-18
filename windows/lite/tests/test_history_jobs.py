@@ -173,6 +173,102 @@ TEXTS = [
 
 
 class JobCompletionTests(_JobTestCase):
+    def test_cancel_and_publish_are_serialized_without_overwriting_terminal_state(self):
+        snapshot = self.store.snapshot(self.scope)
+        payload = {"summary": "synthetic", "items": [], "timeline": []}
+        jobs = self.jobs()
+
+        for index in range(8):
+            job = self.analysis_store.create_job(
+                self.scope, f"profile-{index}", "model-a", "prompt-a",
+                snapshot.source_version, snapshot.memory_version,
+                total_batches=0, total_records=0, total_chars=0,
+                parse_missing_pages=0, page_issue_count=0, records=[],
+                status="running", stage="reduce")
+            gate = threading.Barrier(3)
+            results = {}
+
+            def cancel_job():
+                gate.wait()
+                results["cancel"] = jobs.cancel(job.job_id)
+
+            def publish_job():
+                gate.wait()
+                results["publish"] = self.analysis_store.save_report_and_complete(
+                    job.job_id, payload)
+
+            threads = [threading.Thread(target=cancel_job),
+                       threading.Thread(target=publish_job)]
+            for thread in threads:
+                thread.start()
+            gate.wait()
+            for thread in threads:
+                thread.join(timeout=5)
+                self.assertFalse(thread.is_alive())
+
+            final = self.analysis_store.get_job(job.job_id)
+            self.assertIn(final.status, {"cancelled", "completed"})
+            self.assertEqual(results["cancel"].status, final.status)
+            self.assertEqual(results["publish"].status, final.status)
+            with self.analysis_store._connect() as db:
+                report_count = db.execute(
+                    "SELECT COUNT(*) FROM analysis_reports WHERE job_id=?",
+                    (job.job_id,)).fetchone()[0]
+            if final.status == "cancelled":
+                self.assertEqual(report_count, 0)
+            else:
+                self.assertEqual(report_count, 1)
+
+    def test_late_worker_pause_cannot_overwrite_cancellation(self):
+        snapshot = self.store.snapshot(self.scope)
+        job = self.analysis_store.create_job(
+            self.scope, "pause-race", "model-a", "prompt-a",
+            snapshot.source_version, snapshot.memory_version,
+            total_batches=0, total_records=0, total_chars=0,
+            parse_missing_pages=0, page_issue_count=0, records=[],
+            status="running", stage="extract")
+        jobs = self.jobs()
+        gate = threading.Barrier(3)
+        outcomes = {}
+
+        def cancel():
+            gate.wait()
+            outcomes["cancel"] = jobs.cancel(job.job_id)
+
+        def pause_from_worker_failure():
+            gate.wait()
+            outcomes["pause"] = self.analysis_store.pause_job(
+                job.job_id, "模拟模型请求晚到失败。")
+
+        threads = [threading.Thread(target=cancel),
+                   threading.Thread(target=pause_from_worker_failure)]
+        for thread in threads:
+            thread.start()
+        gate.wait()
+        for thread in threads:
+            thread.join(timeout=5)
+            self.assertFalse(thread.is_alive())
+
+        self.assertEqual(self.analysis_store.get_job(job.job_id).status, "cancelled")
+        self.assertEqual(outcomes["cancel"].status, "cancelled")
+
+    def test_cancelled_job_rejects_late_batch_commit(self):
+        self.import_records("客户：合成待办消息")
+        jobs = self.jobs()
+        job_id = jobs.start(self.scope, "cancel-batch")
+        self.analysis_store.start_job(job_id)
+        batch = self.analysis_store.next_pending_batch(job_id)
+        record = next(self.store.iter_records(self.scope, self.source_version()))
+
+        jobs.cancel(job_id)
+        accepted = self.analysis_store.complete_batch(
+            job_id, batch.batch_index,
+            covered=[(record.record_id, 0, len(record.text))],
+            items=[("fact", "不应写入", [(record.record_id, 0, 2)])])
+
+        self.assertFalse(accepted)
+        self.assertFalse(tuple(self.analysis_store.iter_items(job_id)))
+
     def test_complete_job_reports_full_coverage_and_readable_evidence(self):
         self.import_records(*TEXTS)
         jobs = self.jobs(limits=PlanLimits(max_batch_bytes=140, max_overlap_records=0))

@@ -20,6 +20,9 @@ import time
 
 from . import settings
 from .analysis import build_payload, parse_result
+from .contracts import CancellationToken
+from .inference_schemas import (InferenceRequest, InferenceResult,
+                                validate_content, validate_request)
 
 APP_NAME = "ChatAssistantLite"
 APP_VERSION = "0.3"
@@ -441,6 +444,55 @@ def analyze(config, text):
     return parse_result(raw)
 
 
+def run_inference_request(config, request, *, model=None, cancel=None):
+    """Run a schema-checked T3 task through the public Codex app-server.
+
+    The request is sent as an ephemeral, read-only turn. No desktop-private token
+    is read. Cancellation is checked before and after the app-server turn; the
+    current app-server protocol adapter cannot interrupt an in-flight turn.
+    """
+    validate_request(request)
+    if not isinstance(cancel, CancellationToken) and cancel is not None:
+        raise TypeError("cancel 必须是 CancellationToken 或 None")
+    cancel = cancel or CancellationToken()
+    cancel.raise_if_cancelled()
+    data = request.input_data
+    instructions = data.get("instructions")
+    user_input = data.get("input")
+    if not isinstance(instructions, str) or not instructions.strip():
+        messages = data.get("messages")
+        if not isinstance(messages, (list, tuple)) or not messages:
+            raise ValueError("Codex 历史任务缺少模型指令。")
+        rendered = []
+        for message in messages:
+            if not isinstance(message, dict):
+                raise ValueError("Codex 历史任务消息格式不正确。")
+            role, content = message.get("role"), message.get("content")
+            if role not in ("system", "user") or not isinstance(content, str):
+                raise ValueError("Codex 历史任务消息格式不正确。")
+            rendered.append(("系统指令" if role == "system" else "用户输入")
+                            + ":\n" + content)
+        prompt = "\n\n".join(rendered)
+    else:
+        if not isinstance(user_input, str) or not user_input.strip():
+            raise ValueError("Codex 历史任务缺少用户输入。")
+        prompt = "系统指令：\n" + instructions + "\n\n用户输入：\n" + user_input
+    started = time.monotonic()
+    raw = _shared(config).run_turn(prompt, model=model)
+    cancel.raise_if_cancelled()
+    try:
+        validated = validate_content(request.kind, raw, request)
+    except Exception as exc:
+        from .inference_schemas import SchemaError
+        if isinstance(exc, SchemaError):
+            raise ValueError("Codex 返回内容未通过任务结构校验，请重试。") from None
+        raise
+    return InferenceResult(validated_data=validated, request_id="codex-app-server",
+                           elapsed=max(0.0, time.monotonic() - started))
+
+
 def read_image(config, image_bytes):
     model = (config.get("reading_model") or "").strip() or None
+    if model is None:
+        raise ValueError("请先从 Codex 图像模型列表中明确选择读取模型。")
     return _shared(config).run_turn(READ_INSTRUCTIONS, model=model, image=image_bytes)
