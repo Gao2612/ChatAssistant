@@ -1,9 +1,22 @@
 """OCR-located conversation finder for the real WeChat window (T10/T12).
 
 The fixed-ratio layout estimate is not stable across WeChat versions; this module
-locates the search box and the matching result row by OCR inside the window's
-client frame, then verifies the conversation header before returning. It is the
-same flow validated manually in the real-window acceptance, packaged for the UI.
+locates the search box, clicks the **exact-name** search-result row and verifies
+the conversation header before returning.
+
+Safety rules (hard):
+
+* the search-result dropdown is rendered outside the main window's WGC surface,
+  so the finder grabs the foreground window from the screen (in memory only,
+  never written to disk); the window must already be visible and activated;
+* only a row whose normalized OCR text equals the target name is clicked — a
+  substring match could open a message-preview or network-search row and switch
+  to the wrong conversation; an ambiguous (duplicate) row fails closed;
+* the header is accepted only on an exact normalized match (three crops/readers);
+  a single-character difference is reported as ``title_mismatch``, never accepted;
+* no Enter is ever pressed after the result click: if focus returns to an
+  existing draft, Enter would send a message. Builds that keep the overlay open
+  must fail closed instead.
 """
 from __future__ import annotations
 
@@ -12,6 +25,7 @@ import time
 from dataclasses import dataclass, field
 
 from . import wechat_actions as wa
+from .discovery import window_status
 
 try:  # make WGC frames and click coordinates share one physical coordinate space
     ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))
@@ -46,15 +60,73 @@ def _resolve_hwnd(window) -> int | None:
     return None
 
 
+def _foreground_ok(hwnd: int) -> bool:
+    """Visible and actually foreground; screen capture/click is only safe then."""
+    import ctypes
+    try:
+        if window_status(int(hwnd)) != "visible":
+            return False
+        return int(ctypes.windll.user32.GetForegroundWindow() or 0) == int(hwnd)
+    except (OSError, ValueError):
+        return False
+
+
 def capture_client_bgr(hwnd: int, *, timeout: float = 5.0):
-    """Return (BGR frame cropped to the client area, width, height) or None."""
+    """Return (RGB frame cropped to the visible client area, width, height) or None.
+
+    WeChat 4.x renders the search-result dropdown in a separate layered surface:
+    a Windows Graphics Capture of the main HWND **does not contain it** (measured
+    2026-10-18), so result rows could never be seen that way and the older flow
+    clicked stale sidebar rows instead. The foreground window is therefore
+    grabbed from the screen (in memory only, never written to disk) and cropped
+    to the client area with ``ClientToScreen``. Safety: only a visible window that
+    is the real foreground window is captured; otherwise this returns None so the
+    finder fails closed instead of reading/clicking another window's pixels.
+    """
     import ctypes.wintypes as wt
 
     import numpy as np
-    from windows_capture import WindowsCapture
 
+    if not _foreground_ok(hwnd):
+        return None
     client = wt.RECT()
+    window = wt.RECT()
     if not ctypes.windll.user32.GetClientRect(hwnd, ctypes.byref(client)):
+        return None
+    width, height = int(client.right), int(client.bottom)
+    if width <= 0 or height <= 0:
+        return None
+    try:
+        from PIL import ImageGrab
+
+        if not ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(window)):
+            raise OSError("GetWindowRect")
+        origin = wt.POINT(0, 0)
+        if not ctypes.windll.user32.ClientToScreen(hwnd, ctypes.byref(origin)):
+            raise OSError("ClientToScreen")
+        offset_x = int(origin.x) - int(window.left)
+        offset_y = int(origin.y) - int(window.top)
+        grabbed = np.array(ImageGrab.grab(
+            bbox=(int(window.left), int(window.top),
+                  int(window.right), int(window.bottom)),
+            all_screens=True))[:, :, :3]
+        left, top = max(0, offset_x), max(0, offset_y)
+        right = min(grabbed.shape[1], offset_x + width)
+        bottom = min(grabbed.shape[0], offset_y + height)
+        if right - left >= 40 and bottom - top >= 40:
+            return grabbed[top:bottom, left:right], width, height
+    except (ImportError, OSError, RuntimeError, ValueError):
+        pass
+    return _capture_wgc_client_bgr(hwnd, width, height, timeout)
+
+
+def _capture_wgc_client_bgr(hwnd: int, width: int, height: int,
+                            timeout: float = 5.0):
+    """Fallback: main-window WGC surface (does not include the search dropdown)."""
+    import numpy as np
+    try:
+        from windows_capture import WindowsCapture
+    except ImportError:
         return None
     frames = []
     capture = WindowsCapture(cursor_capture=None, draw_border=None,
@@ -80,9 +152,8 @@ def capture_client_bgr(hwnd: int, *, timeout: float = 5.0):
     if not frames:
         return None
     image = frames[0][:, :, ::-1]
-    height = min(image.shape[0], client.bottom + 2)
-    width = min(image.shape[1], client.right + 2)
-    return image[:height, :width], client.right, client.bottom
+    return (image[:min(image.shape[0], height + 2),
+                  :min(image.shape[1], width + 2)], width, height)
 
 
 def _ocr_rows(reader, image, top: int = 0):
@@ -95,6 +166,63 @@ def _ocr_rows(reader, image, top: int = 0):
         rows.append((str(text), int(min(xs)), int(min(ys)) + top,
                      int(max(xs)), int(max(ys)) + top))
     return rows
+
+
+def _result_rows(rows, title, width, height):
+    """Exact-name search-result rows only; message previews/inputs never qualify.
+
+    WeChat's search panel mixes the contact row (name only) with message-history
+    rows whose text merely contains the query (e.g. ``包含：部亚禹``), network
+    results (``Q...`` prefix) and the search input itself. A substring check used
+    to click those rows and opened the wrong conversation, which only the header
+    check caught. Only a row whose normalized text equals the target name *and*
+    which sits below the search input band is a safe click target.
+    """
+    min_y = int(height * 0.10)
+    return [row for row in rows
+            if row[3] < int(width * 0.33) and row[2] >= min_y
+            and _title_matches(row[0], title)]
+
+
+def _header_secondary_match(reader, frame, width, height, title):
+    """Second, tighter header crop + 2x upscale, still requiring an exact match.
+
+    No fuzzy tolerance: a header that differs by even one character can belong to
+    a different contact, so a controlled tolerance is only reporting evidence,
+    never an acceptance path.
+    """
+    import numpy as np
+    crop = frame[int(height * 0.02):int(height * 0.11),
+                 int(width * 0.24):int(width * 0.62)]
+    if crop.size == 0:
+        return False
+    images = [np.ascontiguousarray(crop)]
+    try:
+        import cv2
+        images.append(cv2.resize(images[0], None, fx=2.0, fy=2.0,
+                                 interpolation=cv2.INTER_CUBIC))
+    except Exception:  # noqa: BLE001 - optional OCR aid
+        pass
+    for image in images:
+        try:
+            rows = _ocr_rows(reader, image)
+        except (OSError, RuntimeError, ValueError):
+            continue
+        if any(_title_matches(row[0], title) for row in rows):
+            return True
+    try:
+        if _title_matches(_read_title_crop(crop), title):
+            return True
+    except (ImportError, OSError, RuntimeError, ValueError):
+        pass
+    return False
+
+
+def _read_title_crop(crop):
+    """App's own title reader on an RGB crop (imported lazily; tests may patch)."""
+    import numpy as np
+    from vendor.ocr import read_title
+    return read_title(np.ascontiguousarray(crop))
 
 
 def find_conversation(window, title, *, backend=None, capture=None, reader=None,
@@ -160,7 +288,11 @@ def find_conversation(window, title, *, backend=None, capture=None, reader=None,
                 if not search_rows:
                     continue
                 _text, sx0, sy0, sx1, sy1 = search_rows[0]
+            if not _foreground_ok(hwnd):
+                return fail("not_foreground")
             backend.click(hwnd, (sx0 + sx1) // 2, (sy0 + sy1) // 2)
+            if not _foreground_ok(hwnd):
+                return fail("not_foreground")
             backend.key_combo((wa.VK_CONTROL, wa.VK_A))
             if not backend.set_clipboard_text(title):
                 return fail("clipboard_failed")
@@ -173,9 +305,9 @@ def find_conversation(window, title, *, backend=None, capture=None, reader=None,
                     time.sleep(0.4)
                     continue
                 frame, width, height = captured
-                sidebar = frame[:, :max(1, int(width * 0.32))]
-                candidates = [row for row in _ocr_rows(reader, sidebar)
-                              if title in row[0] and row[2] > 90]
+                sidebar = frame[:, :max(1, int(width * 0.33))]
+                candidates = _result_rows(_ocr_rows(reader, sidebar), title,
+                                          width, height)
                 if candidates:
                     break
                 time.sleep(0.5)
@@ -183,7 +315,14 @@ def find_conversation(window, title, *, backend=None, capture=None, reader=None,
                 break
         if not candidates:
             return fail("result_not_found")
+        if len(candidates) > 1:
+            # Two rows carry the identical name: the click target is ambiguous.
+            _escape(backend, hwnd)
+            return fail("result_ambiguous")
         _text, x0, y0, x1, y1 = candidates[0]
+        if not _foreground_ok(hwnd):
+            _escape(backend, hwnd)
+            return fail("not_foreground")
         backend.click(hwnd, (x0 + x1) // 2, (y0 + y1) // 2)
         time.sleep(settle)
         # Never press Enter here: once the result opens, focus can return to an
@@ -199,6 +338,11 @@ def find_conversation(window, title, *, backend=None, capture=None, reader=None,
             frame, width, height = captured
             header = frame[:max(1, int(height * 0.14)), int(width * 0.22):]
             if any(_title_matches(row[0], title) for row in _ocr_rows(reader, header)):
+                matched = True
+                break
+            # Second, tighter header crop (measured x≈0.25w, title band) with an
+            # exact match under 1x/2x and the app's own read_title path.
+            if _header_secondary_match(reader, frame, width, height, title):
                 matched = True
                 break
             # Header OCR sometimes misreads one character (e.g. 郜→部) that the
