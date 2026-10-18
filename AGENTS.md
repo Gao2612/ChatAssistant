@@ -54,3 +54,8 @@ DeepSeek Lead 已将卡点任务分派到看板 **source=codex**，Codex 请先�
 认领命令：
 `& G:\codex\wechat-lite-venv\Scripts\python.exe G:\codex\team-board\board.py claim --task C1 --owner codex --source codex`
 （C2–C5 同理；只写 `source=codex`，不要改动 `source=deepseek` 的任务。）
+### Codex 额度空窗期接管（2026-10-18）
+
+Codex 5 小时额度在 14:51 重置；DeepSeek 侧已启动多智能体临时接管 C1–C5，计划与运行名单见
+[docs/windows/CODEX_TAKEOVER_2026-10-18.md](docs/windows/CODEX_TAKEOVER_2026-10-18.md)。
+Codex 14:51 恢复后请先读该 MD 与看板 `TAKE-C*` 完成情况，只做复核/补漏，避免重复实现。

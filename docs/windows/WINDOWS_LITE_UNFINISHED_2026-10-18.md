@@ -101,3 +101,9 @@
 Codex 已在 `AGENTS.md` 的「Codex 分派任务」节获得指引；看板地址
 <http://127.0.0.1:8790/>（顶部 Codex 卡片可筛选）。DeepSeek Lead 收到 Codex 完成结果后
 复核、跑全量测试、更新矩阵与四文档，再交用户最终人工签收。
+### 接管状态（2026-10-18 10:15）
+
+**Codex 5 小时额度在 14:51 重置；此前 DeepSeek 多智能体临时接管 C1–C5。**
+运行名单、分工、写作用域与交还协议见 [CODEX_TAKEOVER_2026-10-18.md](CODEX_TAKEOVER_2026-10-18.md)。
+本地看板对应 `TAKE-C1…TAKE-C5`（source=deepseek，进行中）；C1–C5 原任务仍留给 Codex，
+14:51 后 Codex 先看接管证据，只复核/补漏，不重复实现。
