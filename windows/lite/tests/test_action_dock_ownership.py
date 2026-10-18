@@ -46,7 +46,8 @@ class FinderNoSendTests(unittest.TestCase):
         backend = FakeBackend()
         reader = FakeReader(script([('Q搜索',98,58)], [('田子夜',145,115)],
                                    [('田子夜',390,56)]))
-        with patch('liteapp.wechat_find.time.sleep'):
+        with patch('liteapp.wechat_find.time.sleep'), \
+             patch('liteapp.wechat_find._foreground_ok', return_value=True):
             result = find_conversation(WECHAT_HWND, '田子夜', backend=backend,
                 reader=reader, capture=lambda hwnd:(frame(),1200,800), settle=0)
         self.assertTrue(result.ok, result.reason)

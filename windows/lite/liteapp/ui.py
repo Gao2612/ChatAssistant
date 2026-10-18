@@ -22,6 +22,7 @@ from .contracts import CancellationToken, SourceKey
 from .state import ConversationState, FrameFreshness, choose_window
 from .discovery import (
     WindowTarget, discover, dpi, find_wechat_windows, restore_window, wechat_presence,
+    window_status, foreground_window,
 )
 from .worker import run as capture_run
 from . import account_store, analysis, backends, codex_backend, reading, subscription
@@ -32,6 +33,30 @@ from .inference_schemas import (
     KIND_REALTIME_REPLY, InferenceAuthError, InferenceQuotaError, InferenceRequest,
 )
 from .window_manager import WindowManager, rect_to_physical
+
+
+def normalize_title_for_match(value):
+    """Normalize an OCR/window conversation title for auto-action comparison.
+
+    Only whitespace and common punctuation are ignored. The comparison itself is
+    an exact equality: a substring match would let "田子夜2" pass for the target
+    "田子夜" and act on the wrong conversation (H3).
+    """
+    return "".join(ch for ch in str(value or "")
+                   if ch.strip() and ch not in "：:·.|").casefold()
+
+
+def titles_match(current, expected):
+    """Fail-closed exact title equality after normalization."""
+    current_clean = normalize_title_for_match(current)
+    expected_clean = normalize_title_for_match(expected)
+    return bool(current_clean) and current_clean == expected_clean
+
+
+# Lookup failures that are safe to retry once: the interaction is read-only
+# (activate/capture/click search + result) and never sends a message.
+FIND_TRANSIENT_REASONS = ("search_not_found", "result_not_found",
+                          "capture_failed")
 
 STYLE_PRESETS = (
     "自然、简短",
@@ -976,6 +1001,10 @@ class MainWindow(QMainWindow):
         self._style_profile = None
         self.style_busy = False
         self.wechat_busy = False
+        # C1: pre-lookup render readiness wait + one bounded retry for transient
+        # first-frame/search failures (overridable by tests/tools).
+        self._wechat_find_ready_wait = 2.5
+        self._wechat_find_retries = 1
         # T9: stable conversation bindings + local memory retrieval.
         from .conversation_binding import ConversationBindings
         self.bindings = ConversationBindings()
@@ -2318,6 +2347,106 @@ class MainWindow(QMainWindow):
                          int(max(xs)), int(max(ys)) + top))
         return rows
 
+    def _wait_wechat_render_ready(self, hwnd, timeout=None):
+        """Make WeChat visible/foreground and wait for a rendered frame before OCR.
+
+        ``wechat_find`` now captures the *foreground window* (the search result
+        dropdown lives outside the main window's WGC surface) and returns
+        ``not_foreground``/None unless WeChat really is foreground. This wait
+        performs the same single best-effort activation the lookup itself does
+        (no loop of activations, no move/minimize/hide/restore of the user's
+        window), then waits for a non-blank frame. On timeout it returns False
+        and the lookup still runs, keeping the existing fail-closed path.
+        """
+        if timeout is None:
+            timeout = getattr(self, "_wechat_find_ready_wait", 0.0)
+        try:
+            timeout = float(timeout)
+        except (TypeError, ValueError):
+            return False
+        if timeout <= 0:
+            return False
+        try:
+            from .wechat_actions import Win32Backend
+            Win32Backend().activate(int(hwnd))
+        except (OSError, RuntimeError, ValueError):
+            pass
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                if window_status(int(hwnd)) != "visible":
+                    return False
+                if foreground_window() == int(hwnd):
+                    from .wechat_find import capture_client_bgr
+                    import numpy as np
+                    captured = capture_client_bgr(int(hwnd), timeout=1.0)
+                    if captured is not None:
+                        frame, _width, _height = captured
+                        if float(np.asarray(frame).std()) > 5.0:
+                            return True
+            except (OSError, RuntimeError, ValueError, TypeError):
+                pass
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.12)
+
+    def _run_find_with_recovery(self, hwnd, target):
+        """One bounded retry for transient lookup failures; ESC at most once.
+
+        The retry and the final failure both need a clean search state, but two
+        global ESC injections would be redundant/risky; ``escaped`` guarantees at
+        most one ESC attempt per action.
+        """
+        from .wechat_find import find_conversation
+        attempts = 1 + max(0, int(getattr(self, "_wechat_find_retries", 1)))
+        escaped = False
+        result = None
+        for attempt in range(attempts):
+            if attempt:
+                if not escaped:
+                    self._escape_wechat_search(hwnd)
+                    escaped = True
+                self._wait_wechat_render_ready(hwnd, timeout=1.2)
+            result = find_conversation(hwnd, target)
+            if getattr(result, "ok", False):
+                return result
+            reason = str(getattr(result, "reason", "") or "")
+            if reason not in FIND_TRANSIENT_REASONS:
+                break
+        if not getattr(result, "ok", False) and not escaped:
+            self._escape_wechat_search(hwnd)
+            escaped = True
+        return result
+
+    def _escape_wechat_search(self, hwnd):
+        """Fail-safe ESC after a failed lookup: close any search overlay, never send.
+
+        ESC is sent only while the WeChat window is visible and foreground: a
+        global SendInput ESC to whatever window happens to be foreground could
+        hit unrelated UI. If the window is not foreground, one best-effort
+        activation is attempted and ESC is skipped when it still fails. After
+        ESC the window is re-checked; if our own ESC/overlay left it hidden it is
+        re-shown with SW_SHOWNOACTIVATE. ESC can never send a message.
+        """
+        hwnd = int(hwnd)
+        try:
+            import ctypes
+            from .wechat_actions import Win32Backend
+            backend = Win32Backend()
+            if window_status(hwnd) != "visible":
+                return False
+            if foreground_window() != hwnd:
+                backend.activate(hwnd)
+                if foreground_window() != hwnd:
+                    return False
+            backend.key_combo((0x1B,))
+            if window_status(hwnd) != "visible":
+                ctypes.windll.user32.ShowWindow(hwnd, 4)  # SW_SHOWNOACTIVATE
+                time.sleep(0.1)
+            return True
+        except (OSError, RuntimeError, ValueError, TypeError):
+            return False
+
     def find_wechat_conversation(self):
         target = self.settings_page.auto_target.text().strip()
         if not target:
@@ -2338,17 +2467,24 @@ class MainWindow(QMainWindow):
         self.set_notice(f"正在查找微信对话：{target}…")
 
         def work():
-            was_hidden = self._prepare_wechat_for_action(hwnd)
+            # H4: the whole action runs inside try/finally so a failure in
+            # _prepare_wechat_for_action (or any other step) can never leave
+            # wechat_busy=True with the capture worker stopped forever.
+            was_hidden = False
             try:
-                from .wechat_find import find_conversation
-                result = find_conversation(hwnd, target)
+                was_hidden = self._prepare_wechat_for_action(hwnd)
+                self._wait_wechat_render_ready(hwnd)
+                result = self._run_find_with_recovery(hwnd, target)
                 self.bus.wechat_action_done.emit("find", result, "")
             except Exception as exc:  # noqa: BLE001 - UI thread reports the message
                 self.bus.wechat_action_done.emit(
                     "find", None,
                     str(exc) if isinstance(exc, ValueError) else "自动查找对话失败。")
             finally:
-                self._finish_wechat_action(hwnd, was_hidden)
+                try:
+                    self._finish_wechat_action(hwnd, was_hidden)
+                except Exception:  # noqa: BLE001 - restore must not mask the result
+                    pass
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -2385,18 +2521,28 @@ class MainWindow(QMainWindow):
         self.set_notice("正在发送建议到微信…")
 
         def work():
-            was_hidden = self._prepare_wechat_for_action(hwnd)
+            # H4: the whole action runs inside try/finally so a failure in
+            # _prepare_wechat_for_action (or any other step) can never leave
+            # wechat_busy=True with the capture worker stopped forever.
+            was_hidden = False
             try:
+                was_hidden = self._prepare_wechat_for_action(hwnd)
                 from . import wechat_actions as wechat_actions
-                from vendor.ocr import Reader
-                plan = wechat_actions.plan_for_window(hwnd)
-                verifier = wechat_actions.make_ocr_verifier(hwnd, None)
-                current = verifier()
-                if not current or title not in current:
-                    raise ValueError("当前会话标题与目标不一致，已取消发送。")
-                image, _cw, ch = self._capture_client_frame(hwnd)
+                from vendor.ocr import Reader, read_title
+
+                image, client_width, ch = self._capture_client_frame(hwnd)
                 if image is None:
                     raise ValueError("无法获取微信画面，已取消发送。")
+                # H3: exact normalized title equality (never a substring match).
+                # "田子夜2" must not pass for the target "田子夜"; on mismatch the
+                # send is cancelled before any click/keystroke reaches WeChat.
+                try:
+                    header = image[:max(1, int(ch * 0.14)), int(client_width * 0.22):]
+                    current_title = read_title(header) if header.size else ""
+                except Exception:  # noqa: BLE001 - unreadable title fails closed
+                    current_title = ""
+                if not titles_match(current_title, title):
+                    raise ValueError("当前会话标题与目标不一致，已取消发送。")
                 reader = Reader()
                 rows = self._ocr_rows(image[int(ch * 0.72):, :], reader,
                                       top=int(ch * 0.72))
@@ -2441,7 +2587,10 @@ class MainWindow(QMainWindow):
                     str(exc) if isinstance(exc, (ValueError, OSError))
                     else "自动发送失败。")
             finally:
-                self._finish_wechat_action(hwnd, was_hidden)
+                try:
+                    self._finish_wechat_action(hwnd, was_hidden)
+                except Exception:  # noqa: BLE001 - restore must not mask the result
+                    pass
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -2494,6 +2643,7 @@ class MainWindow(QMainWindow):
             "search_not_found": "没有找到微信搜索框，请确认微信主窗口已打开。",
             "result_not_found": "搜索结果里没有找到该联系人，请检查名称后重试。",
             "capture_failed": "无法获取微信画面，请确认微信窗口可见后重试。",
+            "not_foreground": "微信窗口不在前台，已取消操作；请让微信保持可见后重试。",
             "clipboard_failed": "无法写入剪贴板，请重试。",
         }
         if reason in mapping:
@@ -3037,3 +3187,4 @@ class MainWindow(QMainWindow):
         except OSError:
             pass
         event.accept()
+
