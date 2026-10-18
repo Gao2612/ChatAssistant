@@ -135,3 +135,17 @@ assert item["status"] == "visible", f"微信窗口不是 visible: {item['status'
 - C3 的“最小化测试”必须在同一脚本内 `finally` 恢复 `visible`，结束状态必须是 visible。
 - 证据 MD 第一行写：`preflight: visible`、应用版本/commit（0.5.8 source tree `a3b2994`）。
 - 窗口非 visible 期间采集的任何结果一律作废，不写证据、不下结论。
+## C1 真实 UI 证据要求（history P1，2026-10-18）
+
+- 真实 UI 验收**不得使用已安装 0.5.7 / 真实 profile**：必须用隔离 LOCALAPPDATA + 0.5.8 source tree（HEAD `a3b2994`）启动独立 ChatAssistantLite。
+- 证据 MD 必须写：PID、app_version、commit、profile 是否隔离（路径）、窗口 hwnd。
+- 不点击/不操作已安装 0.5.7 实例，不杀用户正在跑的实例；若单实例激活旧实例则停止并报告。
+- 当前已知旧实例（09:56 起）PID 5652/34388/23020，可忽略；隔离 data dir 下不冲突。
+
+## 完成同步到 Codex 面板（用户要求）
+
+每个接管任务完成时：
+1. 先写证据 MD（版本+commit+命令+结果+风险）；
+2. 本地看板 `TAKE-Cx` progress/complete（source=deepseek）；
+3. **同步 Codex 面板**：`board.py progress --task Cx --text "DeepSeek 接管完成：...（证据文件/命令/结果）" --status in_progress/--percent N --source codex`；只有真正满足验收才 `--status completed --percent 100`，否则注明“待 Codex 复核/未完成”；
+4. 事件：`board.py event --text "..." --agent deepseek-lead --task Cx --source codex`。
