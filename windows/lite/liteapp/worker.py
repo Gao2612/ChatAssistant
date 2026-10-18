@@ -183,8 +183,10 @@ def run(out, stop, hwnd, session, frame_clock, reading_backend="ocr"):
                     latest[0] = None
                 continue
             try:
-                hidden_now = window_status(hwnd_value) != "visible"
+                lifecycle = window_status(hwnd_value)
+                hidden_now = lifecycle != "visible"
             except Exception:
+                lifecycle = "visible"
                 hidden_now = False
             official_wechat = False
             if hidden_now:
@@ -202,12 +204,23 @@ def run(out, stop, hwnd, session, frame_clock, reading_backend="ocr"):
                     start_wgc()
                 except Exception:
                     stop_wgc()
+            if hidden_now and lifecycle == "minimized":
+                # Never show/move a minimized WeChat to grab it: doing so fights the
+                # user's attempt to restore it from the taskbar and can keep stealing
+                # the window. Keep the state read-only and wait for a real restore.
+                emit("unavailable", state="minimized",
+                     message="微信已最小化，读取已暂停；还原微信窗口后自动继续。")
+                last_frame = None
+                with lock:
+                    latest[0] = None
+                stop.wait(0.8)
+                continue
             if hidden_now:
-                # Window closed to tray / minimized: WeChat has no DWM surface while
-                # fully hidden. Capture it through a brief off-screen, non-activating
-                # show (tray_capture restores its position and hidden state), so the
-                # assistant keeps reading without stealing focus. Throttled because
-                # each capture briefly shows the window off-screen.
+                # Window closed to tray / fully hidden: capture it through a brief
+                # off-screen, non-activating show (tray_capture restores its position
+                # and hidden state) so the assistant keeps reading without stealing
+                # focus. Throttled because each capture briefly shows the window
+                # off-screen. A merely minimized window is skipped above instead.
                 now = time.monotonic()
                 if now - last_hidden_capture[0] < 2.5:
                     stop.wait(0.4)

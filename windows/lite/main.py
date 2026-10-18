@@ -162,13 +162,24 @@ def main():
         from liteapp.ui import MainWindow
         app = QApplication(sys.argv)
         app.setApplicationName("ChatAssistantLite")
+        # Taskbar grouping/identity: without an explicit AppUserModelID Windows may
+        # attribute the window to the temporary _MEIxxxx folder or the python host,
+        # which is why the taskbar kept showing a stale/generic icon.
+        try:
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+                "ChatAssistant.Lite.Desktop")
+        except (AttributeError, OSError):
+            pass
         # 0.5.21 logo: the exe icon is embedded by build.ps1 (--icon); also set the
         # Qt window/taskbar icon from the packaged assets when available.
         from PySide6.QtGui import QIcon
         icon_root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
         icon_path = icon_root / "assets" / "ChatAssistant.ico"
+        app_icon = QIcon()
         if icon_path.exists():
-            app.setWindowIcon(QIcon(str(icon_path)))
+            app_icon = QIcon(str(icon_path))
+            app.setWindowIcon(app_icon)
         smoke = "--smoke" in sys.argv
         window = MainWindow(scanning=not smoke)
         # A second launch only asks for activation; never open a second window.

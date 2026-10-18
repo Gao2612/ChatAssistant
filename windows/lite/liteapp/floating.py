@@ -1,72 +1,86 @@
 """Floating assistant ball with per-contact affection.
 
-The ball is the primary compact interface: a draggable always-on-top circular
-button showing the current contact's affection score. Expanding it reveals live
-status, a per-contact profile summary, the AI suggestions and actions. The main
-window keeps settings/history only.
+The collapsed ball is the primary compact surface; expanding it opens a small
+popover-style workspace: identity + affection, actions, structured profile and
+the AI suggestion cards. The main window keeps settings/history only.
 """
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 from PySide6.QtCore import Qt, QTimer, QRectF
-from PySide6.QtGui import (
-    QColor, QLinearGradient, QMouseEvent, QPainter, QPainterPath, QPen, QPixmap,
-    QRegion,
-)
+from PySide6.QtGui import QAction, QColor, QLinearGradient, QMouseEvent, QPainter, QPen
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget,
+    QApplication, QFrame, QGridLayout, QHBoxLayout, QLabel, QMenu, QPushButton,
+    QScrollArea, QStackedWidget, QVBoxLayout, QWidget,
 )
 
-BALL_STYLE = """
+FLOAT_STYLE = """
+QWidget#floatRoot { background: transparent; }
 QFrame#floatPanel {
-    background: #F7F5EE; border: 1px solid #D5D0C4; border-radius: 14px;
+    background: #F7F5EE;
+    border: 1px solid #D5D0C4;
+    border-radius: 16px;
 }
-QLabel#floatTitle { color: #1F2421; font-size: 15px; font-weight: 600; }
-QLabel#floatName { color: #176B5B; font-size: 15px; font-weight: 700; }
-QLabel#floatScore { color: #176B5B; font-size: 22px; font-weight: 800; }
-QLabel#floatMuted { color: #6B746E; font-size: 12px; }
+QFrame#floatCard {
+    background: #FFFFFF;
+    border: 1px solid #E4E0D6;
+    border-radius: 10px;
+}
+QLabel#brandLabel { color: #5E665F; font-size: 11px; letter-spacing: 1px; }
+QLabel#floatName { color: #1A2621; font-size: 16px; font-weight: 700; }
+QLabel#floatStatus { color: #6B746E; font-size: 11px; }
+QLabel#floatScore { color: #176B5B; font-size: 17px; font-weight: 800; }
+QLabel#floatLevel { color: #176B5B; font-size: 12px; font-weight: 600; }
+QLabel#floatMuted { color: #636B65; font-size: 12px; }
+QLabel#floatTiny { color: #6C746E; font-size: 11px; }
 QLabel#floatReply { color: #1F2421; font-size: 12px; }
+QLabel#floatBadge {
+    color: #176B5B; background: #E6F2EC; border-radius: 8px;
+    font-size: 10px; font-weight: 700; padding: 1px 7px;
+}
+QLabel#floatInitial {
+    color: #FFFFFF; background: #176B5B; border-radius: 16px;
+    font-size: 14px; font-weight: 700;
+}
 QPushButton {
-    background: #FFFFFF; border: 1px solid #CFCBC0; border-radius: 6px;
-    padding: 4px 8px; color: #1F2421; font-size: 12px;
+    background: #FFFFFF; border: 1px solid #D2CEC3; border-radius: 8px;
+    padding: 5px 10px; color: #1F2421; font-size: 12px;
 }
-QPushButton:hover { background: #EEF3EF; }
+QPushButton:hover { background: #EEF3EF; border-color: #B9D3C7; }
+QPushButton:focus { border: 2px solid #176B5B; }
+QPushButton#floatPrimary:focus { border: 2px solid #0B3A32; }
+QPushButton#floatSecondary:focus, QPushButton#floatFavorite:focus,
+QPushButton#floatGhost:focus, QPushButton#floatSmall:focus {
+    border: 1px solid #176B5B; background: #EEF3EF;
+}
+QPushButton:pressed { background: #E2ECE6; }
+QPushButton#floatPrimary:disabled {
+    background: #DCE8E2; border-color: #DCE8E2; color: #426055;
+}
+QPushButton#floatSecondary:disabled, QPushButton#floatSmall:disabled,
+QPushButton#floatFavorite:disabled, QPushButton#floatGhost:disabled {
+    background: #F0EEE8; border-color: #E2DED3; color: #8A948D;
+}
 QPushButton#floatPrimary {
-    background: #176B5B; border-color: #176B5B; color: #FFFFFF; font-weight: 600;
+    background: #176B5B; border: 1px solid #176B5B; color: #FFFFFF;
+    font-weight: 700; min-height: 34px;
 }
+QPushButton#floatPrimary:hover { background: #1C7C69; }
 QPushButton#floatPrimary:disabled { background: #A9C4BA; border-color: #A9C4BA; }
-QPushButton#floatFavorite { border-color: #B6D6C9; color: #176B5B; }
-QPushButton#floatGhost { border: 0; background: transparent; padding: 2px 6px; }
+QPushButton#floatSecondary { color: #176B5B; border-color: #B6D6C9; min-height: 34px; }
+QPushButton#floatFavorite { color: #176B5B; border-color: #B6D6C9; padding: 3px 10px; }
+QPushButton#floatGhost { border: 0; background: transparent; padding: 2px 6px; color: #5E665F; }
+QPushButton#floatGhost:hover { background: #ECE9E0; }
+QPushButton#floatSmall { padding: 2px 8px; font-size: 11px; }
+QScrollArea#floatScroll { background: transparent; border: 0; }
+QWidget#floatScrollBody { background: transparent; }
 """
 
 COLLAPSED = 68
-EXPANDED_W, EXPANDED_H = 400, 560
-
-_logo_cache = None
-
-
-def _asset_dir() -> Path:
-    """Bundled assets dir in both the source tree and the PyInstaller build."""
-    if getattr(sys, "frozen", False) and getattr(sys, "_MEIPASS", None):
-        return Path(sys._MEIPASS) / "assets"
-    return Path(__file__).resolve().parent.parent / "assets"
-
-
-def _ball_logo() -> QPixmap | None:
-    """0.5.21 green speech-bubble/heart logo used by the circular ball."""
-    global _logo_cache
-    if _logo_cache is None:
-        path = _asset_dir() / "ChatAssistant.png"
-        pixmap = QPixmap(str(path))
-        _logo_cache = pixmap if not pixmap.isNull() else False
-    return _logo_cache or None
-
+EXPANDED_W, EXPANDED_H = 412, 624
 
 
 class BallFace(QWidget):
-    """Circular gradient face with an affection arc and score."""
+    """Circular gradient face with an affection ring and score."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -83,68 +97,89 @@ class BallFace(QWidget):
     def paintEvent(self, event):  # noqa: N802 - Qt API
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        side = min(self.width(), self.height())
-        rect = QRectF(0, 0, side, side)
-        clip = QPainterPath()
-        clip.addEllipse(rect)
-        painter.setClipPath(clip)
-        painter.fillRect(rect, QColor("#123F37"))
-
-        logo = _ball_logo()
-        if logo is not None:
-            scaled = logo.scaled(
-                int(round(side)), int(round(side)),
-                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                Qt.TransformationMode.SmoothTransformation)
-            source = QRectF((scaled.width() - side) / 2.0,
-                            (scaled.height() - side) / 2.0, side, side)
-            painter.drawPixmap(rect, scaled, source)
-        else:
-            gradient = QLinearGradient(rect.topLeft(), rect.bottomRight())
-            gradient.setColorAt(0.0, QColor("#1B806B"))
-            gradient.setColorAt(1.0, QColor("#0B3A32"))
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(gradient)
-            painter.drawEllipse(rect)
-            painter.setPen(QColor("#F7F5EE"))
-            font = painter.font()
-            font.setPointSizeF(15)
-            font.setBold(True)
-            painter.setFont(font)
-            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "AI")
-
-        # Affection score remains available as a thin outer arc around the logo.
+        rect = QRectF(3, 3, self.width() - 6, self.height() - 6)
+        gradient = QLinearGradient(rect.topLeft(), rect.bottomRight())
+        gradient.setColorAt(0.0, QColor("#1B806B"))
+        gradient.setColorAt(1.0, QColor("#0B3A32"))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(gradient)
+        painter.drawEllipse(rect)
+        arc = QRectF(rect.left() + 5, rect.top() + 5,
+                     rect.width() - 10, rect.height() - 10)
+        track_pen = QPen(QColor(255, 255, 255, 48), 4)
+        track_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(track_pen)
+        painter.drawArc(arc, 90 * 16, -360 * 16)
         if self._score is not None:
-            painter.setClipping(False)
-            arc = QRectF(2.0, 2.0, side - 4.0, side - 4.0)
-            track = QPen(QColor(247, 245, 238, 90), 3)
-            track.setCapStyle(Qt.PenCapStyle.RoundCap)
-            painter.setPen(track)
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawArc(arc, 90 * 16, -360 * 16)
-            progress = QPen(QColor("#9BE7C9"), 3)
-            progress.setCapStyle(Qt.PenCapStyle.RoundCap)
-            painter.setPen(progress)
+            progress_pen = QPen(QColor("#9BE7C9"), 4)
+            progress_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            painter.setPen(progress_pen)
             span = max(0, min(100, int(self._score))) * 360 / 100
             painter.drawArc(arc, 90 * 16, -int(span * 16))
-
+        core = rect.adjusted(10, 10, -10, -10)
+        painter.setPen(QPen(QColor(255, 255, 255, 120), 1.2))
+        painter.setBrush(QColor("#F7F5EE"))
+        painter.drawEllipse(core)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(23, 107, 91, 18))
+        painter.drawEllipse(QRectF(core.left() + 6, core.top() + 7,
+                                   core.width() - 12, core.height() * 0.42))
+        painter.setPen(QColor("#176B5B"))
+        font = painter.font()
+        font.setPointSizeF(16 if self._score is None else 17)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.drawText(core, Qt.AlignmentFlag.AlignCenter,
+                         "AI" if self._score is None else str(int(self._score)))
         if self._favorite:
-            painter.setClipping(True)
-            badge_side = side * 0.30
-            badge = QRectF(side - badge_side - 3, side - badge_side - 3,
-                           badge_side, badge_side)
+            badge = QRectF(rect.right() - 24, rect.bottom() - 24, 20, 20)
             painter.setPen(QPen(QColor("#F7F5EE"), 2))
             painter.setBrush(QColor("#9BE7C9"))
             painter.drawEllipse(badge)
             heart_font = painter.font()
-            heart_font.setPointSizeF(max(7.0, side * 0.13))
+            heart_font.setPointSizeF(8)
             painter.setFont(heart_font)
             painter.setPen(QColor("#0F483D"))
             painter.drawText(badge, Qt.AlignmentFlag.AlignCenter, "♥")
 
 
+class AffectionMeter(QWidget):
+    """Compact 60px affection arc used in the expanded header."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(60, 60)
+        self._score = None
+        self.setAccessibleName("好感度")
+
+    def set_score(self, score):
+        self._score = score
+        self.setAccessibleDescription(
+            "暂无好感度" if score is None else f"好感度 {int(score)} 分（满分 100）")
+        self.update()
+
+    def paintEvent(self, event):  # noqa: N802 - Qt API
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        rect = QRectF(5, 5, 50, 50)
+        painter.setPen(QPen(QColor("#E1E8E3"), 5))
+        painter.drawArc(rect, 90 * 16, -360 * 16)
+        if self._score is not None:
+            painter.setPen(QPen(QColor("#176B5B"), 5, Qt.PenStyle.SolidLine,
+                                Qt.PenCapStyle.RoundCap))
+            span = max(0, min(100, int(self._score))) * 360 / 100
+            painter.drawArc(rect, 90 * 16, -int(span * 16))
+        painter.setPen(QColor("#176B5B"))
+        font = painter.font()
+        font.setPointSizeF(12 if self._score is not None else 9)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.drawText(rect, Qt.AlignmentFlag.AlignCenter,
+                         "—" if self._score is None else str(int(self._score)))
+
+
 class FloatingAssistant(QWidget):
-    """Draggable ball expanding to status + affection + AI suggestions."""
+    """Draggable ball expanding to identity/affection/actions/professional cards."""
 
     def __init__(self, host, parent=None):
         super().__init__(parent, Qt.WindowType.Tool
@@ -154,23 +189,23 @@ class FloatingAssistant(QWidget):
         self._drag_offset = None
         self._dragged = False
         self._expanded = False
+        self._menu_open = False
+        self._press_global = None
+        self._press_origin = None
         self.setWindowTitle("ChatAssistant · 悬浮球")
         self.setObjectName("floatRoot")
-        # Round ball: transparent, unmasked corners would still render as a square
-        # tool window on Windows, so clip the top-level window to the circle.
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
-        self.setStyleSheet(BALL_STYLE)
+        self.setAccessibleName("ChatAssistant 悬浮球")
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setStyleSheet(FLOAT_STYLE)
         self.setFixedSize(COLLAPSED, COLLAPSED)
-        self._apply_ball_mask()
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
         self.ball = BallFace()
-        # Let the top-level window receive drag/click: the painted face is a child
-        # widget and must not swallow mouse events.
         self.ball.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         root.addWidget(self.ball)
 
@@ -178,105 +213,223 @@ class FloatingAssistant(QWidget):
         self.panel.setObjectName("floatPanel")
         self.panel.setVisible(False)
         panel = QVBoxLayout(self.panel)
-        panel.setContentsMargins(12, 8, 12, 10)
-        panel.setSpacing(6)
+        panel.setContentsMargins(14, 10, 14, 10)
+        panel.setSpacing(9)
 
         header = QHBoxLayout()
-        title = QLabel("ChatAssistant")
-        title.setObjectName("floatTitle")
-        header.addWidget(title, 1)
+        header.setSpacing(8)
+        self.avatar = QLabel("聊")
+        self.avatar.setObjectName("floatInitial")
+        self.avatar.setFixedSize(32, 32)
+        self.avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        header.addWidget(self.avatar)
+        identity = QVBoxLayout()
+        identity.setSpacing(0)
+        brand = QLabel("微信 · 本地分析")
+        brand.setObjectName("brandLabel")
+        identity.addWidget(brand)
+        self.name_label = QLabel("尚未连接会话")
+        self.name_label.setObjectName("floatName")
+        identity.addWidget(self.name_label)
+        header.addLayout(identity, 1)
         self.favorite_button = QPushButton("固定")
         self.favorite_button.setObjectName("floatFavorite")
         self.favorite_button.setToolTip("只自动分析固定联系人；其他联系人需点分析")
+        self.favorite_button.setAccessibleName("固定当前联系人")
         self.favorite_button.clicked.connect(self._toggle_favorite)
         header.addWidget(self.favorite_button)
+        self.more_button = QPushButton("设置")
+        self.more_button.setObjectName("floatGhost")
+        self.more_button.setToolTip("打开设置与模型")
+        self.more_button.setAccessibleName("设置")
+        self.more_button.clicked.connect(self.show_main_settings)
+        header.addWidget(self.more_button)
         self.collapse_button = QPushButton("−")
         self.collapse_button.setObjectName("floatGhost")
         self.collapse_button.setFixedWidth(24)
+        self.collapse_button.setToolTip("收起为悬浮球")
+        self.collapse_button.setAccessibleName("收起悬浮球")
         self.collapse_button.clicked.connect(self.collapse)
         header.addWidget(self.collapse_button)
-        self.settings_button = QPushButton("设置")
-        self.settings_button.setObjectName("floatGhost")
-        self.settings_button.clicked.connect(self.show_main_settings)
-        header.addWidget(self.settings_button)
-        self.profile_button = QPushButton("档案")
-        self.profile_button.setObjectName("floatGhost")
-        self.profile_button.setToolTip("在历史页查看/生成该联系人的专属风格与画像")
-        self.profile_button.clicked.connect(self.show_main_history)
-        header.addWidget(self.profile_button)
-        self.quit_button = QPushButton("退出")
+        self.quit_button = QPushButton("×")
         self.quit_button.setObjectName("floatGhost")
+        self.quit_button.setFixedWidth(24)
+        self.quit_button.setToolTip("关闭悬浮球并退出")
+        self.quit_button.setAccessibleName("关闭并退出")
         self.quit_button.clicked.connect(self._quit)
         header.addWidget(self.quit_button)
         panel.addLayout(header)
 
-        name_row = QHBoxLayout()
-        self.name_label = QLabel("尚未连接会话")
-        self.name_label.setObjectName("floatName")
-        name_row.addWidget(self.name_label, 1)
+        affection = QFrame()
+        affection.setObjectName("floatCard")
+        affection_layout = QHBoxLayout(affection)
+        affection_layout.setContentsMargins(10, 8, 10, 8)
+        affection_layout.setSpacing(10)
+        self.affection_meter = AffectionMeter()
+        affection_layout.addWidget(self.affection_meter)
+        affection_text = QVBoxLayout()
+        affection_text.setSpacing(2)
+        score_row = QHBoxLayout()
+        score_row.setSpacing(6)
         self.affection_label = QLabel("好感度 —")
         self.affection_label.setObjectName("floatScore")
-        name_row.addWidget(self.affection_label)
-        panel.addLayout(name_row)
-
+        score_row.addWidget(self.affection_label)
+        self.level_badge = QLabel("待识别")
+        self.level_badge.setObjectName("floatBadge")
+        score_row.addWidget(self.level_badge, 0, Qt.AlignmentFlag.AlignVCenter)
+        score_row.addStretch(1)
+        affection_text.addLayout(score_row)
         self.affection_detail = QLabel("等待识别到聊天后计算本地好感度")
         self.affection_detail.setObjectName("floatMuted")
         self.affection_detail.setWordWrap(True)
-        panel.addWidget(self.affection_detail)
-        self.profile_label = QLabel("专属档案：未生成")
-        self.profile_label.setObjectName("floatMuted")
-        self.profile_label.setWordWrap(True)
-        panel.addWidget(self.profile_label)
-        self.model_label = QLabel("模型档案：待分析")
-        self.model_label.setObjectName("floatMuted")
-        self.model_label.setWordWrap(True)
-        panel.addWidget(self.model_label)
+        affection_text.addWidget(self.affection_detail)
+        self.dimension_labels = []
+        dimension_grid = QGridLayout()
+        dimension_grid.setHorizontalSpacing(8)
+        dimension_grid.setVerticalSpacing(1)
+        for index in range(6):
+            label = QLabel("")
+            label.setObjectName("floatTiny")
+            label.setToolTip("")
+            dimension_grid.addWidget(label, index // 3, index % 3)
+            self.dimension_labels.append(label)
+        affection_text.addLayout(dimension_grid)
+        affection_layout.addLayout(affection_text, 1)
+        panel.addWidget(affection)
 
         self.status_label = QLabel("等待微信窗口")
         self.status_label.setObjectName("floatMuted")
         self.status_label.setWordWrap(True)
         panel.addWidget(self.status_label)
 
+        actions = QHBoxLayout()
+        actions.setSpacing(8)
         self.analyze_button = QPushButton("分析当前对话")
         self.analyze_button.setObjectName("floatPrimary")
         self.analyze_button.clicked.connect(self._analyze)
-        panel.addWidget(self.analyze_button)
+        actions.addWidget(self.analyze_button, 1)
         self.model_button = QPushButton("模型分析档案")
-        self.model_button.setToolTip("对已导入的完整历史分块调用模型，逐句判断情绪/意图并生成档案")
+        self.model_button.setObjectName("floatSecondary")
+        self.model_button.setToolTip(
+            "对已导入的完整历史分块调用模型，逐句判断情绪/意图并生成档案")
         self.model_button.clicked.connect(self._model_analyze)
-        panel.addWidget(self.model_button)
+        actions.addWidget(self.model_button, 1)
+        panel.addLayout(actions)
+
+        self.profile_card = QFrame()
+        self.profile_card.setObjectName("floatCard")
+        profile_layout = QVBoxLayout(self.profile_card)
+        profile_layout.setContentsMargins(10, 8, 10, 8)
+        profile_layout.setSpacing(4)
+        profile_header = QHBoxLayout()
+        profile_title = QLabel("专属档案")
+        profile_title.setObjectName("floatLevel")
+        profile_header.addWidget(profile_title)
+        self.profile_badge = QLabel("未建立")
+        self.profile_badge.setObjectName("floatBadge")
+        profile_header.addWidget(self.profile_badge)
+        profile_header.addStretch(1)
+        self.open_profile_button = QPushButton("档案 ↗")
+        self.open_profile_button.setObjectName("floatSmall")
+        self.open_profile_button.setToolTip("打开历史与档案页，导入 HTML/PDF 或查看完整档案")
+        self.open_profile_button.clicked.connect(self.show_main_history)
+        profile_header.addWidget(self.open_profile_button)
+        profile_layout.addLayout(profile_header)
+        self.profile_label = QLabel("导入聊天记录后自动建立关系、话题与重要日期")
+        self.profile_label.setObjectName("floatMuted")
+        self.profile_label.setWordWrap(True)
+        profile_layout.addWidget(self.profile_label)
+        self.profile_extra = QLabel("")
+        self.profile_extra.setObjectName("floatTiny")
+        self.profile_extra.setWordWrap(True)
+        profile_layout.addWidget(self.profile_extra)
+        self.model_label = QLabel("模型档案：待分析")
+        self.model_label.setObjectName("floatTiny")
+        self.model_label.setWordWrap(True)
+        profile_layout.addWidget(self.model_label)
+        panel.addWidget(self.profile_card)
+
+        suggestions_header = QHBoxLayout()
+        suggestions_title = QLabel("AI 建议")
+        suggestions_title.setObjectName("floatLevel")
+        self.suggestions_title = suggestions_title
+        suggestions_header.addWidget(suggestions_title)
+        self.suggestion_count = QLabel("暂无")
+        self.suggestion_count.setObjectName("floatTiny")
+        suggestions_header.addWidget(self.suggestion_count)
+        suggestions_header.addStretch(1)
+        panel.addLayout(suggestions_header)
+
+        self.empty_card = QFrame()
+        self.empty_card.setObjectName("floatCard")
+        empty_layout = QVBoxLayout(self.empty_card)
+        empty_layout.setContentsMargins(12, 12, 12, 12)
+        empty_layout.setSpacing(3)
+        empty_title = QLabel("还没有新的建议")
+        empty_title.setObjectName("floatLevel")
+        empty_layout.addWidget(empty_title)
+        empty_hint = QLabel("点上方“分析当前对话”，会生成 3 条可直接复制的回复。")
+        empty_hint.setObjectName("floatMuted")
+        empty_hint.setWordWrap(True)
+        self.empty_hint = empty_hint
+        empty_layout.addWidget(empty_hint)
+
+        self.suggestions_scroll = QScrollArea()
+        self.suggestions_scroll.setObjectName("floatScroll")
+        self.suggestions_scroll.setWidgetResizable(True)
+        self.suggestions_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.suggestions_body = QWidget()
+        self.suggestions_body.setObjectName("floatScrollBody")
+        self.suggestions_layout = QVBoxLayout(self.suggestions_body)
+        self.suggestions_layout.setContentsMargins(0, 0, 0, 0)
+        self.suggestions_layout.setSpacing(6)
+        self.suggestions_scroll.setWidget(self.suggestions_body)
+
+        # Empty state and populated suggestion list swap in one stable slot; this
+        # avoids reserving a large blank stripe when no analysis is available.
+        self.content_stack = QStackedWidget()
+        self.content_stack.addWidget(self.empty_card)
+        self.content_stack.addWidget(self.suggestions_scroll)
+        panel.addWidget(self.content_stack, 1)
 
         self.reply_labels, self.copy_buttons, self.send_buttons = [], [], []
+        self.reply_cards = []
         for index in range(3):
-            frame = QFrame()
-            frame_layout = QVBoxLayout(frame)
-            frame_layout.setContentsMargins(0, 1, 0, 1)
-            frame_layout.setSpacing(2)
+            card = QFrame()
+            card.setObjectName("floatCard")
+            card_layout = QVBoxLayout(card)
+            card_layout.setContentsMargins(9, 7, 9, 7)
+            card_layout.setSpacing(4)
             text = QLabel("等待分析")
             text.setObjectName("floatReply")
             text.setWordWrap(True)
             text.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-            frame_layout.addWidget(text)
-            row = QHBoxLayout()
+            card_layout.addWidget(text)
+            buttons = QHBoxLayout()
+            buttons.setSpacing(6)
             copy = QPushButton("复制")
+            copy.setObjectName("floatSmall")
             copy.setEnabled(False)
             copy.clicked.connect(lambda _=False, i=index: self._copy(i))
             send = QPushButton("发送到微信")
+            send.setObjectName("floatSmall")
             send.setEnabled(False)
             send.clicked.connect(lambda _=False, i=index: self._send(i))
-            row.addWidget(copy)
-            row.addWidget(send)
-            row.addStretch(1)
-            frame_layout.addLayout(row)
-            panel.addWidget(frame)
+            buttons.addWidget(copy)
+            buttons.addWidget(send)
+            buttons.addStretch(1)
+            card_layout.addLayout(buttons)
+            self.suggestions_layout.addWidget(card)
+            self.reply_cards.append(card)
             self.reply_labels.append(text)
             self.copy_buttons.append(copy)
             self.send_buttons.append(send)
-        panel.addStretch(1)
-        hint = QLabel("只监控原生微信窗口 · 设置/历史在主界面；好感度是本地估算，仅供参考")
-        hint.setObjectName("floatMuted")
-        hint.setWordWrap(True)
-        panel.addWidget(hint)
+        self.suggestions_layout.addStretch(1)
+
+        footer = QLabel("只监控原生微信窗口 · 好感度为本地估算，仅供参考")
+        footer.setObjectName("floatTiny")
+        footer.setWordWrap(True)
+        panel.addWidget(footer)
         root.addWidget(self.panel, 1)
 
         self._timer = QTimer(self)
@@ -284,11 +437,39 @@ class FloatingAssistant(QWidget):
         self._timer.start(700)
         self.refresh()
 
-    # -- state --------------------------------------------------------------
-    def _apply_ball_mask(self):
-        """Clip the collapsed window to a circle (no square tool-window box)."""
-        self.setMask(QRegion(0, 0, COLLAPSED, COLLAPSED,
-                             QRegion.RegionType.Ellipse))
+    def _show_menu(self):
+        menu = QMenu(self)
+        menu.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        settings = QAction("设置与模型", menu)
+        settings.triggered.connect(self.show_main_settings)
+        menu.addAction(settings)
+        profile = QAction("历史与档案", menu)
+        profile.triggered.connect(self.show_main_history)
+        menu.addAction(profile)
+        menu.addSeparator()
+        quit_action = QAction("退出 ChatAssistant", menu)
+        quit_action.triggered.connect(self._quit)
+        menu.addAction(quit_action)
+        self._menu_open = True
+        try:
+            menu.exec(self.more_button.mapToGlobal(self.more_button.rect().bottomLeft()))
+        finally:
+            self._menu_open = False
+            menu.deleteLater()
+
+    @staticmethod
+    def _clean_profile_value(value):
+        """Render stored list/dict profile values as readable text, not repr."""
+        if value is None:
+            return ""
+        if isinstance(value, (list, tuple, set)):
+            items = [str(item).strip() for item in value if str(item).strip()]
+            return "、".join(items)
+        text = str(value).strip()
+        if text.startswith("[") and text.endswith("]"):
+            inner = text[1:-1].replace("'", "").replace('"', "")
+            return "、".join(item.strip() for item in inner.split(",") if item.strip())
+        return text
 
     def refresh(self):
         host = self.host
@@ -296,81 +477,141 @@ class FloatingAssistant(QWidget):
             return
         try:
             title = host.current_contact_title() if hasattr(host, "current_contact_title") else ""
-            self.name_label.setText(title or "尚未连接会话")
+            clean_title = str(title or "").strip()
+            display_title = clean_title if len(clean_title) <= 16 else clean_title[:15] + "…"
+            self.name_label.setText(display_title or "尚未连接会话")
+            self.name_label.setToolTip(clean_title)
+            self.name_label.setAccessibleName(clean_title or "未连接会话")
+            self.avatar.setText((clean_title[:1] or "聊").upper())
             self.status_label.setText(host.connection_status.text() or "等待微信窗口")
             ready = bool(getattr(getattr(host, "state", None), "ready", False))
             busy = bool(getattr(host, "busy", False))
             self.analyze_button.setEnabled(ready and not busy)
+            self.analyze_button.setText("分析中…" if busy else "分析当前对话")
+            self.analyze_button.setToolTip(
+                "正在分析当前对话" if busy else
+                ("分析当前可见对话" if ready else "等待识别到可直接分析的聊天文字"))
             favorite = host.is_favorite_contact(title) if hasattr(host, "is_favorite_contact") else False
             self.favorite_button.setText("已固定" if favorite else "固定")
+            self.favorite_button.setAccessibleName(
+                "取消固定当前联系人" if favorite else "固定当前联系人（只自动分析固定联系人）")
             score = None
             detail = "等待识别到聊天后计算本地好感度"
+            level = "待识别"
+            dimensions = []
             if hasattr(host, "affection_for_current"):
                 profile = host.affection_for_current()
                 if profile is not None:
                     score = int(profile.score)
-                    dims = " · ".join(
-                        f"{d.label}{int(round(d.level + 1))}/5"
-                        for d in profile.dimensions[:3])
+                    level = profile.level_label
+                    dimensions = list(profile.dimensions)
                     if profile.boundary_applied:
-                        detail = f"{profile.level_label} · 对方边界明确，分数封顶 25"
+                        detail = "对方边界明确，分数封顶 25"
                     elif profile.status == "insufficient":
-                        detail = f"{profile.level_label} · 样本不足，仅供参考"
+                        detail = "样本不足，仅供参考"
                     else:
-                        detail = f"{profile.level_label} · {dims} · 本地估算"
-            self.affection_label.setText(f"好感度 {score}" if score is not None else "好感度 —")
+                        detail = "本地估算"
+            self.affection_label.setText("好感度" if score is not None else "好感度 —")
             self.affection_detail.setText(detail)
-            profile = None
+            short_labels = ("主动", "投入", "关心", "开放", "亲密", "行动")
+            for index, label in enumerate(self.dimension_labels):
+                if index < len(dimensions):
+                    dim = dimensions[index]
+                    filled = max(0, min(5, int(round(dim.level + 1))))
+                    label.setText(f"{short_labels[index]} {'●' * filled}{'○' * (5 - filled)}")
+                    label.setToolTip(f"{dim.label}：{filled}/5")
+                    label.setVisible(True)
+                else:
+                    label.setVisible(False)
+            self.level_badge.setText(level[:6] if level else "待识别")
+            self.affection_meter.set_score(score)
+            self.ball.set_state(score, favorite)
+
+            prof = None
             if hasattr(host, "contact_profile_for_current"):
-                profile = host.contact_profile_for_current()
-            profile_parts = []
-            if profile is not None:
-                if profile.relation:
-                    profile_parts.append(f"关系：{profile.relation}")
-                if profile.topics:
-                    profile_parts.append(f"话题：{profile.topics}")
-                if profile.preferences:
-                    profile_parts.append(f"偏好：{profile.preferences}")
-                if profile.taboos:
-                    profile_parts.append(f"禁忌：{profile.taboos}")
-                if profile.important_dates:
-                    profile_parts.append(f"日期：{profile.important_dates}")
-            if profile_parts:
-                prefix = "模型档案" if getattr(profile, "model_analyzed", False) else "基础档案"
-                self.profile_label.setText(prefix + " · " + "；".join(profile_parts))
-            elif profile is not None:
-                self.profile_label.setText("专属档案：已建立，等待生成画像")
+                prof = host.contact_profile_for_current()
+            parts, extras = [], []
+            if prof is not None:
+                if prof.relation:
+                    parts.append(f"关系：{prof.relation}")
+                for label, value in (("话题", getattr(prof, "topics", None)),
+                                     ("偏好", getattr(prof, "preferences", None)),
+                                     ("禁忌", getattr(prof, "taboos", None)),
+                                     ("日期", getattr(prof, "important_dates", None))):
+                    text = self._clean_profile_value(value)
+                    if text:
+                        extras.append(f"{label}：{text}")
+                self.profile_badge.setText(
+                    "模型档案" if getattr(prof, "model_analyzed", False) else "基础档案")
+                self.profile_badge.setStyleSheet("")
+                self.profile_label.setText(" · ".join(parts) or "档案已建立，等待生成画像")
+                self.profile_extra.setText(" · ".join(extras))
+                self.profile_extra.setVisible(bool(extras))
             else:
-                self.profile_label.setText("专属档案：未生成（导入后自动建立）")
-            model_text = ""
+                self.profile_badge.setText("未建立")
+                self.profile_badge.setStyleSheet(
+                    "color:#5F6862;background:#ECE9E0;border-radius:8px;"
+                    "font-size:10px;font-weight:700;padding:1px 7px;")
+                self.profile_label.setText("导入后自动整理关系、话题与重要日期")
+                self.profile_extra.setText("")
+                self.profile_extra.setVisible(False)
+
             if getattr(host, "_model_busy", False):
                 model_text = getattr(host, "_model_progress_text", "") or "模型逐句分析进行中…"
             elif getattr(host, "_model_progress_text", ""):
                 model_text = host._model_progress_text
-            elif profile is not None and getattr(profile, "model_analyzed", False):
+            elif prof is not None and getattr(prof, "model_analyzed", False):
                 model_text = "模型档案：已逐句分析"
             else:
                 model_text = "模型档案：待分析（导入后自动分块分析）"
             self.model_label.setText(model_text)
             self.model_button.setEnabled(not getattr(host, "_model_busy", False))
-            self.ball.set_state(score, favorite)
+
+            present = []
             for index, label in enumerate(self.reply_labels):
                 text = host.reply_boxes[index].text() if index < len(host.reply_boxes) else ""
+                if text and text != "等待分析":
+                    present.append(index)
                 label.setText(text or "等待分析")
                 self.copy_buttons[index].setEnabled(bool(text) and text != "等待分析")
                 self.send_buttons[index].setEnabled(
                     index < len(host.send_buttons)
                     and host.send_buttons[index].isEnabled()
                     and bool(text) and text != "等待分析")
-            if self._expanded:
+            self.empty_card.setVisible(not present)
+            self.suggestions_scroll.setVisible(bool(present))
+            self.content_stack.setCurrentWidget(
+                self.suggestions_scroll if present else self.empty_card)
+            for index, card in enumerate(self.reply_cards):
+                card.setVisible(index in present)
+            self.suggestion_count.setText(f"{len(present)} 条" if present else "暂无")
+            self.suggestions_title.setText(
+                f"给{display_title}的建议" if display_title and display_title != "尚未连接会话"
+                else "AI 建议")
+            self.empty_hint.setText(
+                "正在识别新消息，建议会自动更新。"
+                if (busy or not ready)
+                else "点上方“分析当前对话”，会生成 3 条可直接复制的回复。")
+            if self._expanded and not self._menu_open:
                 self._fit_expanded()
         except RuntimeError:
             self._timer.stop()
 
     def _fit_expanded(self):
-        self.setFixedSize(EXPANDED_W, EXPANDED_H)
-        self.clearMask()
-        self._place_near_current_position()
+        # Drive height from the active content instead of a large magic constant;
+        # clamp to the screen so high-DPI/small displays keep the footer visible.
+        self.layout().activate()
+        self.panel.layout().activate()
+        hint = self.panel.sizeHint().height()
+        target_h = max(470, min(EXPANDED_H, int(hint)))
+        screen = self.screen()
+        if screen is not None:
+            available = screen.availableGeometry().height() - 16
+            target_h = min(target_h, max(420, available))
+        target = (EXPANDED_W, target_h)
+        if self.size().toTuple() != target:
+            self.setFixedSize(*target)
+            self._place_near_current_position()
 
     def _place_near_current_position(self):
         screen = self.screen()
@@ -381,7 +622,6 @@ class FloatingAssistant(QWidget):
         y = max(area.top() + 8, min(self.y(), area.bottom() - self.height() - 8))
         self.move(x, y)
 
-    # -- expand/collapse ----------------------------------------------------
     def expand(self):
         if self._expanded:
             return
@@ -390,6 +630,7 @@ class FloatingAssistant(QWidget):
         self.panel.setVisible(True)
         self._fit_expanded()
         self.refresh()
+        self.analyze_button.setFocus()
 
     def collapse(self):
         if not self._expanded:
@@ -398,12 +639,10 @@ class FloatingAssistant(QWidget):
         self.panel.setVisible(False)
         self.ball.setVisible(True)
         self.setFixedSize(COLLAPSED, COLLAPSED)
-        self._apply_ball_mask()
 
     def toggle(self):
         self.collapse() if self._expanded else self.expand()
 
-    # -- actions ------------------------------------------------------------
     def _analyze(self):
         try:
             self.host.start_analysis()
@@ -472,19 +711,25 @@ class FloatingAssistant(QWidget):
         except RuntimeError:
             pass
 
-    # -- dragging / ball click ---------------------------------------------
     def mousePressEvent(self, event: QMouseEvent):  # noqa: N802 - Qt API
         if event.button() == Qt.MouseButton.LeftButton:
-            self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            self._press_global = event.globalPosition().toPoint()
+            self._press_origin = self.frameGeometry().topLeft()
+            self._drag_offset = self._press_global - self._press_origin
             self._dragged = False
             event.accept()
             return
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent):  # noqa: N802 - Qt API
-        if self._drag_offset is not None and event.buttons() & Qt.MouseButton.LeftButton:
-            self._dragged = True
-            self.move(event.globalPosition().toPoint() - self._drag_offset)
+        if self._press_global is not None and event.buttons() & Qt.MouseButton.LeftButton:
+            current = event.globalPosition().toPoint()
+            if not self._dragged:
+                if (current - self._press_global).manhattanLength() < QApplication.startDragDistance():
+                    event.accept()
+                    return
+                self._dragged = True
+            self.move(current - self._drag_offset)
             event.accept()
             return
         super().mouseMoveEvent(event)
@@ -493,11 +738,30 @@ class FloatingAssistant(QWidget):
         if event.button() == Qt.MouseButton.LeftButton:
             dragged, self._dragged = self._dragged, False
             self._drag_offset = None
-            if not dragged:
-                self.toggle()
+            self._press_global = None
+            self._press_origin = None
+            # Clicking the collapsed ball expands it. In the expanded panel, blank
+            # label/card clicks must not collapse the window accidentally.
+            if not dragged and not self._expanded:
+                self.expand()
             event.accept()
             return
         super().mouseReleaseEvent(event)
+
+    def keyPressEvent(self, event):  # noqa: N802 - Qt API
+        key = event.key()
+        if key == Qt.Key.Key_Escape and self._expanded:
+            self.collapse()
+            event.accept()
+            return
+        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
+            if not self._expanded:
+                self.expand()
+            else:
+                self._analyze()
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     def closeEvent(self, event):  # noqa: N802 - Qt API
         self._timer.stop()

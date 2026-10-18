@@ -231,3 +231,12 @@
 - 新桌面/exe/快捷方式图标（圆角聊天气泡+爱心）；左侧导航改为“对话/档案/设置”文字标签；悬浮球改为奶油内核+渐变进度环+固定心形
 - 全量 **909 tests OK / 42 skipped / exit 0**
 - 仍需：真实 UI C1 复验（避免动用户窗口）、C6/C7/C11/C12 复核、设置页进一步分区（C15）、真实模型 Key
+### 候选包 0.5.27（最小化拦截修复 + 悬浮球重做，2026-10-18）
+
+- 版本 0.5.27；安装包 SHA-256 `ED447CF19B944415616C474E6E219D32FB9950B016741809C524ACEA73E5B96C`
+- Git `879864a` + 未提交改动（dirty）；version-json/隔离 self-test 通过；已覆盖安装到 `E:\ChatAssistantLite`
+- **修复微信最小化被抢占**：采集 worker 检测到 `minimized` 时不再走 tray_capture 的“短暂显示再抓帧”，只发 unavailable 并等待用户还原；实测微信保持 minimized 5 次轮询不变，`restore_window(activate=True)`（启动微信按钮）仍可正常还原
+- **悬浮球重做**：透明窗口圆角面板（不再是黑边方块）、奶油内核+渐变好感环、六维圆点刻度、`设置 / − / ×` 三个明确按钮（不再用 ⋯ 菜单）、空状态与建议用 QStackedWidget 切换、Esc 收起、点击展开不被空白误收起、聚焦样式与 disabled 样式、动态高度按内容收拢
+- 面板字段去掉 `['...']` repr（列表渲染为顿号分隔）
+- 桌面旧 `ChatAssistantLite-Setup-0.5.21.exe` 已删除；exe/快捷方式/任务栏图标均为新图标（并设置 AppUserModelID）
+- 全量 **910 tests OK / 42 skipped**

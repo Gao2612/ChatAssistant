@@ -94,6 +94,21 @@ class FloatingAssistantTests(unittest.TestCase):
         self.assertIs(self.window.page_stack.currentWidget(),
                       self.window.settings_page)
 
+    def test_expanded_blank_click_does_not_collapse(self):
+        self.window.enter_ball_mode()
+        self.app.processEvents()
+        floating = self.window.floating
+        floating.expand()
+        self.app.processEvents()
+        self.assertTrue(floating._expanded)
+        QTest.mouseClick(floating, Qt.MouseButton.LeftButton,
+                         pos=floating.rect().center())
+        self.app.processEvents()
+        self.assertTrue(floating._expanded)
+        QTest.keyClick(floating, Qt.Key.Key_Escape)
+        self.app.processEvents()
+        self.assertFalse(floating._expanded)
+
     def test_floating_header_button_exists(self):
         self.assertEqual(self.window.floating_button.text(), "悬浮球")
         self.assertFalse(self.window.floating_button.isHidden())

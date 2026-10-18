@@ -128,8 +128,9 @@ class ModelProfileUiTests(unittest.TestCase):
                 ball = self.window.floating
                 ball.expand()
                 self.app.processEvents()
-                self.assertIn("模型档案", ball.profile_label.text())
-                self.assertIn("报价", ball.profile_label.text())
+                self.assertEqual(ball.profile_badge.text(), "模型档案")
+                self.assertIn("客户/合作方", ball.profile_label.text())
+                self.assertIn("报价", ball.profile_extra.text())
                 self.assertTrue(ball.model_button.isEnabled())
 
 

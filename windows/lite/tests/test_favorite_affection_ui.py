@@ -77,7 +77,8 @@ class FavoriteAndAffectionTests(unittest.TestCase):
         self.assertIn("好感度", ball.affection_label.text())
         self.assertNotEqual(ball.affection_label.text(), "好感度 —")
         self.assertEqual(ball.favorite_button.text(), "已固定")
-        self.assertTrue(ball.profile_label.text().startswith("专属档案："))
+        self.assertIn(ball.profile_badge.text(), ("未建立", "基础档案", "模型档案"))
+        self.assertTrue(ball.profile_label.text())
 
 
 if __name__ == "__main__":

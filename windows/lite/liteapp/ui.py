@@ -1121,7 +1121,7 @@ class MainWindow(QMainWindow):
     def __init__(self, config=None, scanning=True, window_manager=None, account_store=None,
                  inference_queue=None):
         super().__init__()
-        self.setWindowTitle("微信实时助手 · 便捷版 0.5.21")
+        self.setWindowTitle("微信实时助手 · 便捷版 0.5.27")
         self.resize(1000, 520)
         self.setMinimumSize(900, 500)
         self.setStyleSheet(STYLE)
@@ -1981,10 +1981,16 @@ class MainWindow(QMainWindow):
             if hidden is not None:
                 # Closing WeChat to the tray must not tear down the capture worker:
                 # the worker switches to the off-screen PrintWindow path and keeps
-                # reading the same window without activating it.
+                # reading the same window without activating it. A merely minimized
+                # window is reported separately so the user knows reading paused and
+                # the app never tries to steal/restore it.
                 self.window_item = hidden
-                self.set_connection_status(
-                    "微信已隐藏到托盘，仍在后台读取；点击“启动微信”可恢复窗口。")
+                if hidden.get("minimized"):
+                    self.set_connection_status(
+                        "微信已最小化，读取已暂停；还原微信窗口后自动继续。")
+                else:
+                    self.set_connection_status(
+                        "微信已隐藏到托盘，仍在后台读取；点击“启动微信”可恢复窗口。")
             else:
                 self.stop_capture()
                 self.window_item = None
