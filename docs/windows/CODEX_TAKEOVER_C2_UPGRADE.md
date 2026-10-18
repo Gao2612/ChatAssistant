@@ -162,3 +162,8 @@ A：早期一次未隔离 test installer 试验替换/删除了本机开始菜�
 
 **Q10：最终判定/计数是什么？**
 A：隔离 test-AppId 环境 26/26 步 ok（`ok=true`），其中真实安装链：install 0.4.3 exit 0 → upgrade 0.5.8 exit 0 → uninstall exit 0 + 数据保留 → reinstall exit 0 + 读取恢复；`real_profile_unchanged=true`；V2→V2。脚本可重复：`c2_upgrade_verify.py --help`，默认提交/版本为 0.4.3 `5cafa1a` → 0.5.8 `a3b2994`。完整命令见 §5。
+### 7.7 快捷方式副作用补充（2026-10-18 复核）
+
+- history 复核发现：除开始菜单外，**桌面快捷方式 `ChatAssistant Lite.lnk` 当前也缺失**（OneDrive\Desktop 与 Start Menu 均找不到）。原因应为早期一次未隔离的 test installer 替换/删除快捷方式；不影响已安装 0.5.7、注册表键、运行实例、真实 profile 或任何用户数据。
+- 处置：Lead 已用 WScript.Shell 重建两个快捷方式，指向 `E:\ChatAssistantLite\ChatAssistantLite.exe`（桌面 + 开始菜单）；最终 0.5.8/0.5.9 正式安装会再次创建。
+- 证据：本机桌面/开始菜单 `ChatAssistant Lite.lnk` 已存在；真实安装目录/注册表/进程未改动。
