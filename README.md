@@ -1,7 +1,4 @@
-<<<<<<< HEAD
-=======
 # ChatAssistant
->>>>>>> b921339
 
 ChatAssistant 是 Windows 桌面端的微信辅助工具：把官方微信的原生窗口停靠在应用中央，读取当前会话，交给所选模型生成判断与回复建议，用户在微信里自己核对、手动发送。主实现是 [`windows/lite/`](windows/lite/README.md)（ChatAssistant Lite），桌面端用 PySide6（Qt 6）编写。
 
