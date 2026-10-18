@@ -13,6 +13,8 @@ from PySide6.QtWidgets import (
     QScrollArea, QStackedWidget, QVBoxLayout, QWidget,
 )
 
+from .design.style_loader import load_stylesheet
+
 FLOAT_STYLE = """
 QWidget#floatRoot { background: transparent; }
 QFrame#floatPanel {
@@ -74,6 +76,21 @@ QPushButton#floatSmall { padding: 2px 8px; font-size: 11px; }
 QScrollArea#floatScroll { background: transparent; border: 0; }
 QWidget#floatScrollBody { background: transparent; }
 """
+
+
+def _apply_stylesheet(widget, fallback):
+    """优先套用随包发布的 global.qss，资源缺失时回退到内联 FLOAT_STYLE。
+
+    ``load_stylesheet`` 在 ``liteapp/resources`` 没有随包发布时返回空串，
+    此时保留原来的悬浮球样式，避免打包漏资源后变成裸控件。
+    """
+    stylesheet = load_stylesheet("global.qss")
+    if not stylesheet:
+        print("[floating] 未找到 global.qss，已回退内联 FLOAT_STYLE")
+        stylesheet = fallback
+    widget.setStyleSheet(stylesheet)
+    return stylesheet
+
 
 COLLAPSED = 68
 EXPANDED_W, EXPANDED_H = 412, 624
@@ -199,7 +216,7 @@ class FloatingAssistant(QWidget):
         self.setAccessibleName("ChatAssistant 悬浮球")
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setStyleSheet(FLOAT_STYLE)
+        _apply_stylesheet(self, FLOAT_STYLE)
         self.setFixedSize(COLLAPSED, COLLAPSED)
 
         root = QVBoxLayout(self)

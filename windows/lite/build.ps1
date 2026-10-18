@@ -45,6 +45,7 @@ $ErrorActionPreference = "Continue"
     --name ChatAssistantLite `
     "--icon=$PSScriptRoot\assets\ChatAssistant.ico" `
     "--add-data=assets;assets" `
+    "--add-data=liteapp/resources;liteapp/resources" `
     "--distpath=$outputDir" `
     "--workpath=$workDir" `
     --collect-all rapidocr_onnxruntime `
