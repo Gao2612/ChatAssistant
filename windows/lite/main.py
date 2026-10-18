@@ -162,6 +162,13 @@ def main():
         from liteapp.ui import MainWindow
         app = QApplication(sys.argv)
         app.setApplicationName("ChatAssistantLite")
+        # 0.5.21 logo: the exe icon is embedded by build.ps1 (--icon); also set the
+        # Qt window/taskbar icon from the packaged assets when available.
+        from PySide6.QtGui import QIcon
+        icon_root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+        icon_path = icon_root / "assets" / "ChatAssistant.ico"
+        if icon_path.exists():
+            app.setWindowIcon(QIcon(str(icon_path)))
         smoke = "--smoke" in sys.argv
         window = MainWindow(scanning=not smoke)
         # A second launch only asks for activation; never open a second window.
