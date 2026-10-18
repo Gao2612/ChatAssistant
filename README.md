@@ -4,7 +4,13 @@
 
 Windows 微信内嵌、多账号、实时回复建议，以及 ExportWeChat HTML / 本地聊天记录的历史分析任务方案，见 [详细方案](docs/windows/WINDOWS_WECHAT_PRODUCT_PLAN.md)。其他智能体请先读 [AGENTS.md](AGENTS.md) 和 [交接说明](docs/windows/AGENT_HANDOFF.md)。
 
-Windows 方向已有独立实现 `windows/lite/`（ChatAssistant Lite）：官方微信原生窗口中央停靠 + 本地 OCR/多模态读取 + 右侧 AI 建议 + HTML/PDF 历史导入。2026-10-18 已把「文字读取」和「对话分析」拆成两套可分别选择的后端（读取：本地 OCR / 多模态模型 / Codex；分析：ChatGPT 套餐 / 兼容 API / 本地模型服务 / Codex），并通过 86 项单测与真实 Codex 账号/模型目录 RPC 验证；便携版和 0.3 安装器已重建。真实微信的单击/滚轮/输入法/扫码/弹窗与远程读取质量仍需逐项验收，详见 [验收清单](docs/windows/WINDOWS_LITE_ACCEPTANCE_CHECKLIST_2026-10-18.md) 和 [0.2 验证记录](docs/windows/WINDOWS_LITE_VERIFICATION_2026-10-17.md)。
+Windows 方向已有独立实现 [`windows/lite/`](windows/lite/README.md)（ChatAssistant Lite）：官方微信原生窗口中央停靠 + 本地 OCR/多模态读取 + 右侧 AI 建议 + 悬浮球 + HTML/PDF 历史导入 + 多账号，并新增 DSH 传输层（`dsh_transport.py` / `dsh_models.py`）。**已装版本 0.5.30**，工作分支 `feat/windows-lite`。
+
+- **0.6.0 UI/UX 重设计进行中**：取消现有的「76px 导航轨 + 三页并列 + 右侧 AI 抽屉」，改为「左侧主导航 + 中央工作台 + 按需上下文面板」，四个一级区域为 工作台 / 会话档案 / 任务与记录 / 设置。设计真源：[UI 重设计规范](docs/windows/UI_REDESIGN_2026-10-19.md)。
+- **现状基线**：[ui-audit-2026-10-19/](docs/windows/ui-audit-2026-10-19/) 存有 13 张控件抓图与 13 张原生截图，迁移时逐屏对比。
+- **开发、测试与打包**：解释器、`pytest tests`、PyInstaller onedir + Inno Setup 6 的确切命令与产物目录，见 [windows/lite/README.md](windows/lite/README.md)。
+
+真实微信的单击/滚轮/输入法/扫码/弹窗与远程读取质量仍需逐项验收，详见 [验收清单](docs/windows/WINDOWS_LITE_ACCEPTANCE_CHECKLIST_2026-10-18.md) 和 [0.2 验证记录](docs/windows/WINDOWS_LITE_VERIFICATION_2026-10-17.md)。
 
 已补充 [微信嵌入测试结果](docs/windows/WECHAT_EMBED_TEST_RESULTS_2026-10-14.md) 和 [测试原型源码](windows/probes/wechat-embed/README.md)。旧 `SetParent` 探针存在单击/滚动异常，不代表新的顶层停靠方案通过了全部交互验收。
 
