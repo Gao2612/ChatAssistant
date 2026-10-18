@@ -177,8 +177,35 @@ def _apply_stylesheet(widget, fallback):
     return stylesheet
 
 
+def _repolish(widget):
+    """Re-evaluate QSS property selectors after a dynamic property changes.
+
+    Qt resolves rules such as ``QFrame[role="card"]`` when a widget is
+    polished, so merely calling ``setProperty`` leaves the widget visually
+    unchanged until some unrelated event happens to repolish it.
+    """
+    style = widget.style()
+    style.unpolish(widget)
+    style.polish(widget)
+    widget.update()
+
+
+def _apply_role(widget, role):
+    """Tag a widget with its semantic role (card/panel/divider/title/...)."""
+    widget.setProperty("role", role)
+    _repolish(widget)
+    return widget
+
+
+def _apply_variant(widget, variant):
+    """Tag a button with its semantic variant (primary/ghost/danger)."""
+    widget.setProperty("variant", variant)
+    _repolish(widget)
+    return widget
+
+
 def section_title(text):
-    widget = label(text)
+    widget = label(text, role="subtitle")
     widget.setObjectName("sectionTitle")
     return widget
 
@@ -187,15 +214,18 @@ def divider():
     line = QFrame()
     line.setObjectName("divider")
     line.setFrameShape(QFrame.Shape.HLine)
-    return line
+    return _apply_role(line, "divider")
 
 
-def label(text="", muted=False):
+def label(text="", muted=False, role=None):
     widget = QLabel(text)
     widget.setTextFormat(Qt.TextFormat.PlainText)
     widget.setWordWrap(True)
     if muted:
         widget.setObjectName("muted")
+        role = role or "muted"
+    if role:
+        _apply_role(widget, role)
     return widget
 
 
@@ -294,7 +324,7 @@ class SettingsPage(QWidget):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(24, 22, 24, 18)
         outer.setSpacing(12)
-        title = label("设置")
+        title = label("设置", role="title")
         title.setObjectName("title")
         outer.addWidget(title)
         outer.addWidget(label("管理微信连接、模型和自动分析。", True))
@@ -308,12 +338,15 @@ class SettingsPage(QWidget):
         body.setSpacing(12)
 
         wechat = QGroupBox("微信连接")
+        _apply_role(wechat, "card")
         wechat_layout = QVBoxLayout(wechat)
         path_form = QFormLayout()
         self.path = QLineEdit(config.get("wechat_path", ""))
         browse = QPushButton("选择文件")
+        _apply_variant(browse, "ghost")
         browse.clicked.connect(self.browse)
         auto_detect = QPushButton("自动检测")
+        _apply_variant(auto_detect, "ghost")
         auto_detect.setToolTip("自动查找已安装/正在运行的官方微信，无需手动选择")
         auto_detect.clicked.connect(self.auto_detect_path)
         path_row = QHBoxLayout()
@@ -326,9 +359,13 @@ class SettingsPage(QWidget):
         wechat_layout.addLayout(path_form)
         actions = QHBoxLayout()
         self.refresh_button = QPushButton("刷新窗口")
+        _apply_variant(self.refresh_button, "ghost")
         self.connect_button = QPushButton("连接所选窗口")
+        _apply_variant(self.connect_button, "primary")
         self.launch_button = QPushButton("启动微信")
+        _apply_variant(self.launch_button, "ghost")
         self.disconnect_button = QPushButton("断开连接")
+        _apply_variant(self.disconnect_button, "danger")
         for button in (self.refresh_button, self.launch_button, self.connect_button, self.disconnect_button):
             actions.addWidget(button)
         wechat_layout.addLayout(actions)
@@ -337,6 +374,7 @@ class SettingsPage(QWidget):
         body.addWidget(wechat)
 
         reading_group = QGroupBox("文字读取（屏幕 → 聊天文字）")
+        _apply_role(reading_group, "card")
         reading_layout = QVBoxLayout(reading_group)
         reading_form = QFormLayout()
         self.reading_backend = NoWheelComboBox()
@@ -351,6 +389,7 @@ class SettingsPage(QWidget):
         self.reading_model.setEditText(config.get("reading_model", ""))
         self.reading_model.lineEdit().setPlaceholderText("读取模型 ID；从服务列表选择或手动输入")
         self.fetch_reading_models_button = QPushButton("读取模型列表")
+        _apply_variant(self.fetch_reading_models_button, "ghost")
         self.fetch_reading_models_button.clicked.connect(self.fetch_reading_models)
         self.reading_models_done.connect(self.reading_models_checked)
         self.reading_model_status = label("", True)
@@ -371,6 +410,7 @@ class SettingsPage(QWidget):
         body.addWidget(reading_group)
 
         model_group = QGroupBox("对话分析（聊天文字 → 判断与建议）")
+        _apply_role(model_group, "card")
         model_layout = QVBoxLayout(model_group)
         model_form = QFormLayout()
         self.backend = NoWheelComboBox()
@@ -390,6 +430,7 @@ class SettingsPage(QWidget):
         self.model.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         self.model.currentIndexChanged.connect(self._remember_model_choice)
         self.fetch_models_button = QPushButton("读取模型列表")
+        _apply_variant(self.fetch_models_button, "ghost")
         self.fetch_models_button.clicked.connect(self.fetch_models)
         self.model_row = QHBoxLayout()
         self.model_row.addWidget(self.model, 1)
@@ -417,8 +458,11 @@ class SettingsPage(QWidget):
         self.account_combo = NoWheelComboBox()
         self.account_combo.setMinimumWidth(240)
         self.account_switch_button = QPushButton("切换账号")
+        _apply_variant(self.account_switch_button, "ghost")
         self.account_reauth_button = QPushButton("重新授权")
+        _apply_variant(self.account_reauth_button, "ghost")
         self.account_refresh_models_button = QPushButton("刷新模型")
+        _apply_variant(self.account_refresh_models_button, "ghost")
         self.account_switch_button.clicked.connect(
             lambda: self._account_action("switch"))
         self.account_reauth_button.clicked.connect(
@@ -441,9 +485,12 @@ class SettingsPage(QWidget):
         self.reading_key.textChanged.connect(self.invalidate_reading_models)
         auth_row = QHBoxLayout()
         self.chatgpt_button = QPushButton("连接 ChatGPT 套餐")
+        _apply_variant(self.chatgpt_button, "primary")
         self.usage_button = QPushButton("查看 ChatGPT Usage")
+        _apply_variant(self.usage_button, "ghost")
         self.usage_button.clicked.connect(lambda: webbrowser.open("https://chatgpt.com/settings/usage"))
         self.disconnect_chatgpt_button = QPushButton("断开 ChatGPT 授权")
+        _apply_variant(self.disconnect_chatgpt_button, "danger")
         self.disconnect_chatgpt_button.clicked.connect(self.request_disconnect_chatgpt)
         self.disconnect_chatgpt_button.setVisible(False)
         auth_row.addWidget(self.chatgpt_button)
@@ -481,12 +528,14 @@ class SettingsPage(QWidget):
         self.effective_label = label("", True)
         self.card_save_button = QPushButton("保存设置")
         self.card_save_button.setObjectName("primary")
+        _apply_variant(self.card_save_button, "primary")
         self.card_save_button.clicked.connect(self.commit)
         effective_row.addWidget(self.effective_label, 1)
         effective_row.addWidget(self.card_save_button)
         model_layout.addLayout(effective_row)
         style_row = QHBoxLayout()
         self.style_profile_button = QPushButton("从聊天记录生成专属风格")
+        _apply_variant(self.style_profile_button, "ghost")
         self.style_profile_status = label(
             "先在历史页导入聊天记录并选择当前联系人，再生成专属风格。", True)
         style_row.addWidget(self.style_profile_button)
@@ -497,6 +546,7 @@ class SettingsPage(QWidget):
         self.auto_target = QLineEdit()
         self.auto_target.setPlaceholderText("联系人名称，如：郜亚禹")
         self.auto_find_button = QPushButton("自动查找并切换对话")
+        _apply_variant(self.auto_find_button, "ghost")
         self.auto_send_allowed = QCheckBox("允许把建议发送到微信")
         self.auto_send_allowed.setChecked(bool(config.get("auto_send_allowed", False)))
         auto_row.addWidget(self.auto_target, 1)
@@ -540,14 +590,16 @@ class SettingsPage(QWidget):
         footer = QHBoxLayout()
         footer.addStretch(1)
         self.cancel_button = QPushButton("返回聊天")
+        _apply_variant(self.cancel_button, "ghost")
         self.save_button = QPushButton("保存设置")
         self.save_button.setObjectName("primary")
+        _apply_variant(self.save_button, "primary")
         self.cancel_button.clicked.connect(self.cancel_requested.emit)
         self.save_button.clicked.connect(self.commit)
         footer.addWidget(self.cancel_button)
         footer.addWidget(self.save_button)
         outer.addLayout(footer)
-        self.error = label(muted=True)
+        self.error = label(role="error")
         outer.addWidget(self.error)
 
     def browse(self):
@@ -965,12 +1017,12 @@ class StyleProfileDialog(QDialog):
                    f"来源 {getattr(profile, 'sources_with_me', 0)} 个。"
                    "以下内容由本地统计推断，不代表事实，也不会跨联系人使用。")
         layout.addWidget(label(summary, True))
-        layout.addWidget(label("用户风格报告（给用户看）"))
+        layout.addWidget(label("用户风格报告（给用户看）", role="subtitle"))
         report = QPlainTextEdit()
         report.setReadOnly(True)
         report.setPlainText(getattr(profile, "display_report", "") or "")
         layout.addWidget(report, 1)
-        layout.addWidget(label("模型提示词风格（选用后用于生成建议）"))
+        layout.addWidget(label("模型提示词风格（选用后用于生成建议）", role="subtitle"))
         prompt = QPlainTextEdit()
         prompt.setReadOnly(True)
         prompt.setMaximumHeight(120)
@@ -979,9 +1031,11 @@ class StyleProfileDialog(QDialog):
         buttons = QHBoxLayout()
         buttons.addStretch(1)
         close_button = QPushButton("关闭")
+        _apply_variant(close_button, "ghost")
         close_button.clicked.connect(self.reject)
         apply_button = QPushButton("选用此风格")
         apply_button.setObjectName("primary")
+        _apply_variant(apply_button, "primary")
         apply_button.clicked.connect(self.accept)
         buttons.addWidget(close_button)
         buttons.addWidget(apply_button)
@@ -1236,6 +1290,7 @@ class MainWindow(QMainWindow):
 
         rail = QFrame()
         rail.setObjectName("navigationRail")
+        _apply_role(rail, "panel")
         rail.setFixedWidth(76)
         rail_layout = QVBoxLayout(rail)
         rail_layout.setContentsMargins(8, 14, 8, 12)
@@ -1284,7 +1339,7 @@ class MainWindow(QMainWindow):
         chat_layout.setContentsMargins(20, 18, 16, 14)
         chat_layout.setSpacing(12)
         chat_header = QHBoxLayout()
-        self.chat_title = label("尚未连接会话")
+        self.chat_title = label("尚未连接会话", role="title")
         self.chat_title.setObjectName("title")
         chat_header.addWidget(self.chat_title, 1)
         self.connection_status = label("未连接微信", True)
@@ -1300,6 +1355,7 @@ class MainWindow(QMainWindow):
         self.analysis_status.setMinimumWidth(50)
         chat_header.addWidget(self.analysis_status)
         self.floating_button = QPushButton("悬浮球")
+        _apply_variant(self.floating_button, "ghost")
         self.floating_button.setToolTip(
             "主界面只保留设置/历史；聊天的状态、分析和 AI 建议都在悬浮球")
         self.floating_button.clicked.connect(self.enter_ball_mode)
@@ -1311,6 +1367,7 @@ class MainWindow(QMainWindow):
         chat_body.setSpacing(12)
         chat_content = QFrame()
         chat_content.setObjectName("chatContent")
+        _apply_role(chat_content, "card")
         chat_content_layout = QVBoxLayout(chat_content)
         chat_content_layout.setContentsMargins(12, 10, 12, 10)
         chat_content_layout.setSpacing(8)
@@ -1351,13 +1408,14 @@ class MainWindow(QMainWindow):
 
         self.ai_panel = QFrame()
         self.ai_panel.setObjectName("aiPanel")
+        _apply_role(self.ai_panel, "panel")
         self.ai_panel.setFixedWidth(300)
         self.ai_panel.setVisible(False)
         result_layout = QVBoxLayout(self.ai_panel)
         result_layout.setContentsMargins(12, 10, 12, 10)
         result_layout.setSpacing(8)
         result_header = QHBoxLayout()
-        result_header.addWidget(label("✦ AI 建议"), 1)
+        result_header.addWidget(label("✦ AI 建议", role="subtitle"), 1)
         self.ai_close = QToolButton()
         self.ai_close.setText("×")
         self.ai_close.setToolTip("收起建议")
@@ -1365,12 +1423,14 @@ class MainWindow(QMainWindow):
         result_header.addWidget(self.ai_close)
         result_layout.addLayout(result_header)
         summary_group = QGroupBox("对话判断")
+        _apply_role(summary_group, "card")
         sum_layout = QVBoxLayout(summary_group)
         self.summary = label("等待新对话快照")
         self.summary.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         sum_layout.addWidget(self.summary)
         result_layout.addWidget(summary_group)
         self.memory_button = QPushButton("参考历史：未关联")
+        _apply_variant(self.memory_button, "ghost")
         self.memory_button.setEnabled(False)
         self.memory_button.setToolTip("只检索已关联联系人档案中的本地历史；未关联时不检索任何人")
         self.memory_button.clicked.connect(self.show_memory_context)
@@ -1378,13 +1438,16 @@ class MainWindow(QMainWindow):
         self.reply_boxes, self.copy_buttons, self.send_buttons = [], [], []
         for i in range(3):
             group = QGroupBox(f"回复建议 {i + 1}")
+            _apply_role(group, "card")
             box_layout = QVBoxLayout(group)
             text = label("等待分析")
             text.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             copy = QPushButton("复制")
+            _apply_variant(copy, "ghost")
             copy.setEnabled(False)
             copy.clicked.connect(lambda checked=False, n=i: self.copy_reply(n))
             send = QPushButton("发送到微信")
+            _apply_variant(send, "primary")
             send.setEnabled(False)
             send.clicked.connect(lambda checked=False, n=i: self.send_reply_to_wechat(n))
             buttons_row = QHBoxLayout()

@@ -15,6 +15,27 @@ from PySide6.QtWidgets import (
 
 from .design.style_loader import load_stylesheet
 
+
+def _repolish(widget):
+    """Re-evaluate QSS property selectors after a dynamic property changes."""
+    style = widget.style()
+    style.unpolish(widget)
+    style.polish(widget)
+    widget.update()
+
+
+def _apply_role(widget, role):
+    widget.setProperty("role", role)
+    _repolish(widget)
+    return widget
+
+
+def _apply_variant(widget, variant):
+    widget.setProperty("variant", variant)
+    _repolish(widget)
+    return widget
+
+
 FLOAT_STYLE = """
 QWidget#floatRoot { background: transparent; }
 QFrame#floatPanel {
@@ -228,6 +249,7 @@ class FloatingAssistant(QWidget):
 
         self.panel = QFrame()
         self.panel.setObjectName("floatPanel")
+        _apply_role(self.panel, "panel")
         self.panel.setVisible(False)
         panel = QVBoxLayout(self.panel)
         panel.setContentsMargins(14, 10, 14, 10)
@@ -244,25 +266,30 @@ class FloatingAssistant(QWidget):
         identity.setSpacing(0)
         brand = QLabel("微信 · 本地分析")
         brand.setObjectName("brandLabel")
+        _apply_role(brand, "muted")
         identity.addWidget(brand)
         self.name_label = QLabel("尚未连接会话")
         self.name_label.setObjectName("floatName")
+        _apply_role(self.name_label, "subtitle")
         identity.addWidget(self.name_label)
         header.addLayout(identity, 1)
         self.favorite_button = QPushButton("固定")
         self.favorite_button.setObjectName("floatFavorite")
+        _apply_variant(self.favorite_button, "ghost")
         self.favorite_button.setToolTip("只自动分析固定联系人；其他联系人需点分析")
         self.favorite_button.setAccessibleName("固定当前联系人")
         self.favorite_button.clicked.connect(self._toggle_favorite)
         header.addWidget(self.favorite_button)
         self.more_button = QPushButton("设置")
         self.more_button.setObjectName("floatGhost")
+        _apply_variant(self.more_button, "ghost")
         self.more_button.setToolTip("打开设置与模型")
         self.more_button.setAccessibleName("设置")
         self.more_button.clicked.connect(self.show_main_settings)
         header.addWidget(self.more_button)
         self.collapse_button = QPushButton("−")
         self.collapse_button.setObjectName("floatGhost")
+        _apply_variant(self.collapse_button, "ghost")
         self.collapse_button.setFixedWidth(24)
         self.collapse_button.setToolTip("收起为悬浮球")
         self.collapse_button.setAccessibleName("收起悬浮球")
@@ -270,6 +297,7 @@ class FloatingAssistant(QWidget):
         header.addWidget(self.collapse_button)
         self.quit_button = QPushButton("×")
         self.quit_button.setObjectName("floatGhost")
+        _apply_variant(self.quit_button, "ghost")
         self.quit_button.setFixedWidth(24)
         self.quit_button.setToolTip("关闭悬浮球并退出")
         self.quit_button.setAccessibleName("关闭并退出")
@@ -279,6 +307,7 @@ class FloatingAssistant(QWidget):
 
         affection = QFrame()
         affection.setObjectName("floatCard")
+        _apply_role(affection, "card")
         affection_layout = QHBoxLayout(affection)
         affection_layout.setContentsMargins(10, 8, 10, 8)
         affection_layout.setSpacing(10)
@@ -298,6 +327,7 @@ class FloatingAssistant(QWidget):
         affection_text.addLayout(score_row)
         self.affection_detail = QLabel("等待识别到聊天后计算本地好感度")
         self.affection_detail.setObjectName("floatMuted")
+        _apply_role(self.affection_detail, "muted")
         self.affection_detail.setWordWrap(True)
         affection_text.addWidget(self.affection_detail)
         self.dimension_labels = []
@@ -307,6 +337,7 @@ class FloatingAssistant(QWidget):
         for index in range(6):
             label = QLabel("")
             label.setObjectName("floatTiny")
+            _apply_role(label, "muted")
             label.setToolTip("")
             dimension_grid.addWidget(label, index // 3, index % 3)
             self.dimension_labels.append(label)
@@ -316,6 +347,7 @@ class FloatingAssistant(QWidget):
 
         self.status_label = QLabel("等待微信窗口")
         self.status_label.setObjectName("floatMuted")
+        _apply_role(self.status_label, "muted")
         self.status_label.setWordWrap(True)
         panel.addWidget(self.status_label)
 
@@ -323,10 +355,12 @@ class FloatingAssistant(QWidget):
         actions.setSpacing(8)
         self.analyze_button = QPushButton("分析当前对话")
         self.analyze_button.setObjectName("floatPrimary")
+        _apply_variant(self.analyze_button, "primary")
         self.analyze_button.clicked.connect(self._analyze)
         actions.addWidget(self.analyze_button, 1)
         self.model_button = QPushButton("模型分析档案")
         self.model_button.setObjectName("floatSecondary")
+        _apply_variant(self.model_button, "ghost")
         self.model_button.setToolTip(
             "对已导入的完整历史分块调用模型，逐句判断情绪/意图并生成档案")
         self.model_button.clicked.connect(self._model_analyze)
@@ -335,12 +369,14 @@ class FloatingAssistant(QWidget):
 
         self.profile_card = QFrame()
         self.profile_card.setObjectName("floatCard")
+        _apply_role(self.profile_card, "card")
         profile_layout = QVBoxLayout(self.profile_card)
         profile_layout.setContentsMargins(10, 8, 10, 8)
         profile_layout.setSpacing(4)
         profile_header = QHBoxLayout()
         profile_title = QLabel("专属档案")
         profile_title.setObjectName("floatLevel")
+        _apply_role(profile_title, "subtitle")
         profile_header.addWidget(profile_title)
         self.profile_badge = QLabel("未建立")
         self.profile_badge.setObjectName("floatBadge")
@@ -348,20 +384,24 @@ class FloatingAssistant(QWidget):
         profile_header.addStretch(1)
         self.open_profile_button = QPushButton("档案 ↗")
         self.open_profile_button.setObjectName("floatSmall")
+        _apply_variant(self.open_profile_button, "ghost")
         self.open_profile_button.setToolTip("打开历史与档案页，导入 HTML/PDF 或查看完整档案")
         self.open_profile_button.clicked.connect(self.show_main_history)
         profile_header.addWidget(self.open_profile_button)
         profile_layout.addLayout(profile_header)
         self.profile_label = QLabel("导入聊天记录后自动建立关系、话题与重要日期")
         self.profile_label.setObjectName("floatMuted")
+        _apply_role(self.profile_label, "muted")
         self.profile_label.setWordWrap(True)
         profile_layout.addWidget(self.profile_label)
         self.profile_extra = QLabel("")
         self.profile_extra.setObjectName("floatTiny")
+        _apply_role(self.profile_extra, "muted")
         self.profile_extra.setWordWrap(True)
         profile_layout.addWidget(self.profile_extra)
         self.model_label = QLabel("模型档案：待分析")
         self.model_label.setObjectName("floatTiny")
+        _apply_role(self.model_label, "muted")
         self.model_label.setWordWrap(True)
         profile_layout.addWidget(self.model_label)
         panel.addWidget(self.profile_card)
@@ -369,24 +409,29 @@ class FloatingAssistant(QWidget):
         suggestions_header = QHBoxLayout()
         suggestions_title = QLabel("AI 建议")
         suggestions_title.setObjectName("floatLevel")
+        _apply_role(suggestions_title, "subtitle")
         self.suggestions_title = suggestions_title
         suggestions_header.addWidget(suggestions_title)
         self.suggestion_count = QLabel("暂无")
         self.suggestion_count.setObjectName("floatTiny")
+        _apply_role(self.suggestion_count, "muted")
         suggestions_header.addWidget(self.suggestion_count)
         suggestions_header.addStretch(1)
         panel.addLayout(suggestions_header)
 
         self.empty_card = QFrame()
         self.empty_card.setObjectName("floatCard")
+        _apply_role(self.empty_card, "card")
         empty_layout = QVBoxLayout(self.empty_card)
         empty_layout.setContentsMargins(12, 12, 12, 12)
         empty_layout.setSpacing(3)
         empty_title = QLabel("还没有新的建议")
         empty_title.setObjectName("floatLevel")
+        _apply_role(empty_title, "subtitle")
         empty_layout.addWidget(empty_title)
         empty_hint = QLabel("点上方“分析当前对话”，会生成 3 条可直接复制的回复。")
         empty_hint.setObjectName("floatMuted")
+        _apply_role(empty_hint, "muted")
         empty_hint.setWordWrap(True)
         self.empty_hint = empty_hint
         empty_layout.addWidget(empty_hint)
@@ -414,6 +459,7 @@ class FloatingAssistant(QWidget):
         for index in range(3):
             card = QFrame()
             card.setObjectName("floatCard")
+            _apply_role(card, "card")
             card_layout = QVBoxLayout(card)
             card_layout.setContentsMargins(9, 7, 9, 7)
             card_layout.setSpacing(4)
@@ -426,10 +472,12 @@ class FloatingAssistant(QWidget):
             buttons.setSpacing(6)
             copy = QPushButton("复制")
             copy.setObjectName("floatSmall")
+            _apply_variant(copy, "ghost")
             copy.setEnabled(False)
             copy.clicked.connect(lambda _=False, i=index: self._copy(i))
             send = QPushButton("发送到微信")
             send.setObjectName("floatSmall")
+            _apply_variant(send, "primary")
             send.setEnabled(False)
             send.clicked.connect(lambda _=False, i=index: self._send(i))
             buttons.addWidget(copy)
@@ -445,6 +493,7 @@ class FloatingAssistant(QWidget):
 
         footer = QLabel("只监控原生微信窗口 · 好感度为本地估算，仅供参考")
         footer.setObjectName("floatTiny")
+        _apply_role(footer, "muted")
         footer.setWordWrap(True)
         panel.addWidget(footer)
         root.addWidget(self.panel, 1)
