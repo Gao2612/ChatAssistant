@@ -1,10 +1,24 @@
 # Codex 接管期独立复核报告（history，只读）
 
 - 任务：Team 共享任务 `task-25` / 本地看板镜像 `TAKE-*` 复核者
-- 时间：2026-10-18 10:11 起（Asia/Shanghai），接管窗口 14:51 前；**初稿 v1 10:16，v2 10:18，v3 10:22（含独立全量）**
-- 仓库：`G:\codex\ChatAssistant`，分支 `feat/windows-lite`，**当前基线 HEAD `103f1e4`**（Lead 在 `a3b2994` 0.5.8 review fixes 之上追加 isolated-profile 证据/协作规则文档；上一个基线 `e365c2e`）
-- 复核方式：**只读**。不改业务代码、不 commit/push、不发微信消息、不读取真实聊天内容/凭据。唯一写入：本文件。全量测试已按 Lead 指令独立跑一次（WIP/dirty，见 §7），最终冻结后会再跑干净一次。
-- 基线状态：`a3b2994`/`103f1e4` 后工作区只含 **C1–C5 接管产物**（当前：C1 `ui.py`+测试+2 个 tools、C2 probe/upgrade tools、C3 real-window tool+tests、C5 tests/tools/docs、本报告）；`test-output/` 被 `.gitignore` 忽略。
+- 时间：2026-10-18 10:11 起（Asia/Shanghai），接管窗口 14:51 前；**v1 10:16 → v20 冻结终稿 11:00**
+- 仓库：`G:\codex\ChatAssistant`，分支 `feat/windows-lite`，**最终冻结 HEAD `6e264eb`（clean；`13c7ff3` 为其祖先的 0.5.9 bump 提交）**
+- 复核方式：**只读**。不改业务代码、不 commit/push、不发微信消息、不读取真实聊天内容/凭据。唯一写入：本文件。最终干净全量已跑（§7），结果为 `Ran 750 tests / OK (skipped=37) / exit 0`。
+- 基线状态：冻结工作区 `git status` 为空；接管产物全部已提交；安装版 0.5.9（build_info commit `13c7ff3`、source_digest `9340d08…`，Lead 记录 SHA `119FCC83…40BE1B6`，version/selftest/smoke/verify_install 通过）。
+
+## 0.0 v20 最终冻结终稿（11:00）— 干净全量通过，接管复核结束
+
+- **干净全量（Lead 指定，冻结后）**：HEAD `6e264ebf620533f016c565c6d62d76af558eeba9 docs: record clean 0.5.9 candidate and Codex takeover result`（`git status` 空，dirty=false；`13c7ff3` 为其祖先）；命令 `cd windows/lite; venv python -m unittest discover -s tests -t . -q` → **`Ran 750 tests in 117.904s` / `OK (skipped=37)` / exit code `0`**；运行前后 dirty 均为 0。详见 §7。
+- **接管任务最终状态**：C1 completed（带限定：InvokePattern 等价槽 1 次真实成功；native 鼠标路径与 A-B 真机差分未完成）；C2 completed（隔离 test-AppId 重建包生命周期 26/26；真实候选包/干净 VM 待复跑）；C3 85%（部分自动 + 6 项人工；S-V03 待现场复签；F1/F3 产品建议）；C4 completed（前台守卫/精确匹配/无 Enter，真实窗口两目标成功，16 项测试）；C5 completed（17 项合成测试/证据；合成≠真实模型/双账号）。安装版 0.5.9 已安装并通过自检/冒烟/verify_install（Lead 记录）。
+- **剩余风险（终稿保留）**：
+  1. C1：native 鼠标点击路径未验收、A-B 差分未产出（驱动层限制；产品槽已由 InvokePattern 等价触发验证）。  
+  2. C2：正式 AppId 的真实覆盖升级/干净 VM 未验；0.4.x 为 git 历史重建包（§7 已限定）。  
+  3. C3：真实弹窗/真实托盘关闭/停靠视觉/最小化需人工；F1（aperture 最小时长提示不明确）、F3（托盘抓帧与恢复竞争）为低风险产品建议；F2 本机外部窗口/DPI churn 使跨 run 几何不可比。  
+  4. 发送验证 `marker=reply[:6]` 仍偏弱（`ui.py:2563`，P2-3；真实发送需额度，C1/C4 范围外），建议后续加固。  
+  5. C4 屏幕抓取要求微信前台且无遮挡（fail-closed、有 foreground guard）；真实聊天内容不落盘。  
+  6. 严格模型 ID/读取校验的误拒/UX 需真实服务商与真实多模态服务验证（P3）。  
+  7. 本报告 P1/P2 项均已在冻结前跟踪/修复/披露；无未修复的高风险安全问题。
+- **复核结论**：证据链、版本/commit、隔离 profile、真实数据/凭据边界、全量测试均满足；本报告作为只读复核记录随仓库提交（若 Lead 提交）。task-25 完成。
 
 ## 0.0 v19 状态更新（10:58）— C3 最终复核
 
@@ -450,25 +464,28 @@
   - 结果：**`Ran 713 tests in 119.668s` / `OK (skipped=37)` / exit code `0`**。
   - 运行后：dirty 10→13（C1/C2/C3 新文件落盘：`c1_find_ab_diag.py`、`c1_ui_acceptance.py`、`test_c3_evidence_helpers.py`、`c3_real_window_verify.py`、`c2_upgrade_verify.py`）；**本次结果未包含运行开始后才写入的 C1/C2/C3/C4 新测试**（C4 `wechat_find.py` 10:24 才改）。
   - 说明：WIP 中间信号，不能作为最终验收证据；与 Lead 10:16 的 713 OK 基线一致。
-- **最终冻结全量（约 14:30 后）**：待 Lead 通知后重跑同一命令，记录最终 HEAD/commit、dirty 应仅剩接管证据、完整数量/跳过/exit code；先确认 C1/C2/C3/C4 已停止写入；结果追加本节并汇报 Lead。
+- **最终干净全量（Lead 冻结通知后，已执行）**：
+  - 运行前：HEAD `6e264ebf620533f016c565c6d62d76af558eeba9 docs: record clean 0.5.9 candidate and Codex takeover result`；`git status --porcelain` 为空（dirty=false）。Lead 消息中的 `13c7ff3` 已验证为本 HEAD 的祖先（0.5.9 bump 提交）。
+  - 命令：`cd G:\codex\ChatAssistant\windows\lite` + `G:\codex\wechat-lite-venv\Scripts\python.exe -m unittest discover -s tests -t . -q`
+  - 结果：**`Ran 750 tests in 117.904s` / `OK (skipped=37)` / exit code `0`**（119.2s wall）。
+  - 运行后：HEAD 不变、`git status` 仍为空（clean）。
+- 对比：Lead 10:16 基线 713 tests（0.5.8 WIP），冻结后 750 tests（C1/C3/C5 新增测试并入），skipped 仍 37；无失败/错误。此结果作为最终全量证据。
 
-## 8. 后续更新计划（v4 → 终稿）
+## 8. 终稿状态（已完成，11:07）
 
-1. 继续每 15–20 分钟轮询 `git status`/文件时间戳，重点：C4 `tests/test_wechat_find.py`+证据 MD、C1 真实 UI 证据（10:55 后）、C2 证据 MD、C3 真实运行 evidence/MD、C5 结果段；
-2. C4 完成后重点复核 P1-6 是否修复（前台/visible 前置校验、不抓其他应用内容、证据不含 OCR 文本）、测试 mock 覆盖、无 Enter；
-3. C1 真实证据落盘后核对 app_version=0.5.8 + commit + 隔离 profile + PID + 无发送/无旧实例点击；`git status` 确认 C1 未改 `wechat_find.py`；
-4. C2 证据核对 `real_profile_before==after`、`from_version/migrated`、安装/卸载/重装 exit；C3 证据核对 status 过滤、popup 说明、版本 commit、cleanup/restore；
-5. C5 核对结果段已填、测试有效、合成边界声明；
-6. Lead 通知后跑干净全量（冻结工作区），把原始输出/exit code 追加 §7；
-7. 终稿发送 Lead：按“可提交/需修复/需实机”分类；若 C1/C4 仍有 P1 未修或 C4 无测试/无产物，明确标阻塞/风险；完成后复核 task-25。
+- 干净全量通过：HEAD `6e264eb`（clean），`Ran 750 tests / OK (skipped=37) / exit 0`。
+- C1 completed（带限定）、C2 completed（隔离范围）、C4 completed、C5 completed；C3 85%（部分自动 + 人工项，S-V03 待现场复签）。
+- 安装版 0.5.9 已安装（build_info commit `13c7ff3`，Lead 记录 SHA `119FCC83…`）；Codex 面板 C1/C2/C4/C5 completed、C3 85%。
+- 剩余人工/后续项见 `WINDOWS_LITE_UNFINISHED_2026-10-18.md` 与本报告 v20 的“剩余风险”；本报告作为交接复核记录。
+- task-25 已具备完成条件（全量通过 + 报告终稿）。
 
 ## 9. 方法与证据
 
-- `git log`/`git status`/`git diff`（Git at `C:\Program Files\Git\cmd\git.exe`）；当前 HEAD `103f1e4`（`a3b2994` 0.5.8 review fixes + docs）；工作区仅接管产物；
-- 逐文件静态审查：`ui.py`（H3/H4 前后 diff）、`wechat_find.py`（C4 全 diff）、`tests/test_find_pause_capture.py` 新测试、`tests/__init__.py`、`tests/fixtures/native_chat_fixture.py`、C1/C2/C3/C5 tools 与证据 MD、`test-output/` 快照；
+- `git log`/`git status`/`git diff`（Git at `C:\Program Files\Git\cmd\git.exe`）；最终 HEAD `6e264eb`（clean；`13c7ff3` 为祖先）；冻结前工作区 15 个已跟踪修改 + C1–C5 接管产物；
+- 逐文件静态审查：`ui.py`（H3/H4/ESC/A3 retry 前后 diff）、`wechat_find.py`（C4 全 diff）、`tests/test_find_pause_capture.py`/`test_wechat_find*.py`、`tests/__init__.py`、`tests/fixtures/native_chat_fixture.py`、C1/C2/C3/C5 tools 与证据 MD、`test-output/` 快照；
 - 边界扫描：`Select-String` 搜真实 profile/凭据/Enter/发送/ImageGrab/屏幕抓取/status_texts/JSON 输出路径；
-- 已核对：0.4.3 commit `5cafa1a` 的 V2 history API、C2 TEST_APP_ID 唯一、C3 单窗口/visible preflight/cleanup、C5 loopback/synthetic/temp；
-- 独立全量：HEAD `103f1e4` + dirty 713 OK/37 skipped/exit 0（WIP 中间信号）；
-- 未发送微信消息、未修改业务代码/真实 profile、未读取真实聊天内容；等最终冻结后再跑干净全量。
+- 已核对：0.4.3 commit `5cafa1a` 的 V2 history API、C2 TEST_APP_ID 唯一/真实注册表未变/真实 profile SHA、C3 单窗口/visible preflight/cleanup/F1-F4、C4 foreground guard/16 项测试、C5 loopback/synthetic/temp；
+- 独立全量：WIP 713 OK（10:19）→ **冻结干净 750 OK / 37 skipped / exit 0（HEAD `6e264eb`）**；
+- 未发送微信消息、未修改业务代码/真实 profile、未读取真实聊天内容；最终安装版 0.5.9 由 Lead 构建/安装并记录。
 
 > 本文件为只读复核记录，不构成对 C1–C5 的最终验收；最终以 Lead 冻结工作区后的全量测试 + 真实证据为准。
