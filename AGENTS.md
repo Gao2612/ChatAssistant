@@ -28,3 +28,11 @@
 - 报告事实、推断和数据缺口分开，保留原始消息证据与实际覆盖范围。
 - 开始代码修改前确认所需子目录规则；交付说明真实验证和未测项。
 - 当前未完成/待用户验收项唯一清单：[docs/windows/WINDOWS_LITE_UNFINISHED_2026-10-18.md](docs/windows/WINDOWS_LITE_UNFINISHED_2026-10-18.md)
+## 任务看板协作（Codex / 其他 agent）
+
+- 本地看板：http://127.0.0.1:8790/ （本机 127.0.0.1，2 秒自动刷新；顶部「来源分工」区分 DeepSeek 与 Codex，默认两边都可见）。
+- 读写入口：`G:\codex\team-board\board.py`（Python venv：`G:\codex\wechat-lite-venv\Scripts\python.exe`）。
+- Codex 的每次写入必须带 `--source codex`（或设置环境变量 `TEAM_BOARD_SOURCE=codex`），否则任务会落到 DeepSeek 一侧。
+- 标准流程：`show --source codex --status pending` 看待认领 → `claim --task <id> --owner codex --source codex` 认领 → 每完成一步 `progress --task <id> --text "..." --status in_progress --percent <n>` → 完成时 `progress --task <id> --text "完成：..." --status completed --percent 100`。
+- 详细命令、HTTP 接口、提示词模板与冒烟验收见：`G:\codex\team-board\CODEX_BOARD_GUIDE.md`。
+- 约定：不要手工编辑 `board.json`；只读 `source=deepseek` 的任务，不要改动或重排；不能访问 127.0.0.1 时先报告网络/沙箱限制。
