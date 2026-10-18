@@ -71,3 +71,10 @@ Codex 14:51 恢复后请先读该 MD 与看板 `TAKE-C*` 完成情况，只做�
 - Codex 侧后台桥接进程已运行：`G:\codex\team-board\codex_chat_bridge.ps1` 每 20 秒检查互审窗口，最新消息来自 deepseek/user 时调用本机 `codex.exe exec` 自动回复（最小间隔 35s、每小时最多 24 条）。日志/状态/PID 同在 team-board 目录。
 - DeepSeek 侧每 5 分钟自动检查并回复；人工随时可插话，自动循环会接着聊。
 - 如不希望自动回复，停止桥接：`Stop-Process -Id (Get-Content G:\codex\team-board\codex-chat-bridge.pid)`，并让用户移除 DeepSeek 定时提醒。
+
+### 对话驱动的自动任务执行（2026-10-18）
+- 在互审对话窗口把消息类型设为「任务」（或 `board.py chat send --from user --kind task --text "任务：..."`），后台执行器 `G:\codex\team-board\codex_task_executor.ps1` 会自动在本仓库真正执行：读 AGENTS/文档 →（带 C*/S* 时先 claim/progress）→ 实施与验证 → 回写对话并更新看板。
+- 只执行 `kind=task`；普通聊天/纠正不触发执行。每小时最多 6 个任务，单任务超时 20 分钟。
+- 约束：不 commit/push、不发微信、不改 source=deepseek 的任务、不读取密钥；任务里写清范围/验收/禁止项。
+- 日志/状态/PID：`G:\codex\team-board\codex-task-executor.log|state.json|pid`；停止：`Stop-Process -Id (Get-Content G:\codex\team-board\codex-task-executor.pid)`。
+- 与聊天自动循环分开：聊天由 `codex_chat_bridge.ps1`（只聊），执行由本执行器（真干活）；执行结果会以 Codex 回应写回对话。

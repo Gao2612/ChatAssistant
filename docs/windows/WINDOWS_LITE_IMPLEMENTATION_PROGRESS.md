@@ -179,3 +179,10 @@
 - `auto_profile.py`：导入后自动本地基础档案；`history_ui.import_completed` → MainWindow 自动启动模型档案（可配置 `auto_model_profile`）；同名联系人手动关联/新建/取消。
 - 悬浮球：模型档案字段展示、模型分析按钮/进度；固定联系人严格门控自动分析。
 - 全量 888 tests OK/37 skipped；0.5.19 构建/安装待执行。真实模型需用户重填 Key 后验证。
+### 0.5.20 最终集成（2026-10-18 19:44）
+
+- 合并 Codex 0.5.18 未提交改动（历史分析任务/当前会话 Scope/模型目录/窗口诊断）与 DeepSeek 模型模块；首次提交 `1ead87b`（888 tests），点击修复 `a7c5ea0`（889 tests）。
+- `model_affection.py` 分块逐句 emotion/intent + 6 维 affinity，失败重试/partial/cancel/next_offset/progress，解决大文件一次塞爆；`auto_profile.py` 导入自动基础档案，`history_ui.import_completed` 触发 MainWindow 自动模型档案；档案字段 relation/topics/preferences/taboos/reply_style/important_dates/persona；同名手动确认。
+- 悬浮球模型档案字段/进度/“模型分析档案”按钮；BallFace 点击穿透修复。
+- 0.5.20 已安装（SHA `5A5DE2A8…E8CCA4E`）；全量 889 OK/37 skipped。
+- 真实模型未测：DeepSeek API Key 仍需用户重填；导入后自动模型分析将在 Key 就绪后运行，大文件按块进度显示。
