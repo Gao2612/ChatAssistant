@@ -22,6 +22,9 @@ DEFAULTS = {
     # Background monitoring is opt-in and bounded; other windows keep their own
     # normal window and are never moved or typed into.
     "background_monitor": False,
+    # Ball-first UI: the main window keeps settings/history only; the floating
+    # ball owns status, analysis and suggestions.
+    "floating_ball": False,
     # Reading backends: ocr (local, offline), api (multimodal vision API),
     # codex (official app-server image input). Reading and analysis are independent.
     "reading_backend": "ocr", "reading_base_url": "", "reading_model": "",

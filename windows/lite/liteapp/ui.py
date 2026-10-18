@@ -437,10 +437,14 @@ class SettingsPage(QWidget):
         self.background_monitor = QCheckBox(
             "后台监控其他正常微信窗口（默认关闭，最多 2 个；不移动、不键入）")
         self.background_monitor.setChecked(bool(config.get("background_monitor", False)))
+        self.floating_ball = QCheckBox(
+            "使用悬浮球模式：主界面只保留设置/历史，AI 建议在悬浮球")
+        self.floating_ball.setChecked(bool(config.get("floating_ball", False)))
         model_layout.addWidget(self.auto_connect)
         model_layout.addWidget(self.auto_analysis)
         model_layout.addWidget(self.dock_wechat)
         model_layout.addWidget(self.background_monitor)
+        model_layout.addWidget(self.floating_ball)
         model_layout.addWidget(label(
             "默认镜像预览：应用窗口怎么缩放都不改变原生微信的大小与位置，微信窗口可自由拖动；"
             "只有勾选“停靠微信窗口”后，应用才会移动/适配原生窗口（此时窗口由应用管理）。", True))
@@ -792,6 +796,7 @@ class SettingsPage(QWidget):
                        auto_analysis=self.auto_analysis.isChecked(),
                        dock_wechat=self.dock_wechat.isChecked(),
                        background_monitor=self.background_monitor.isChecked(),
+                       floating_ball=self.floating_ball.isChecked(),
                        auto_send_allowed=self.auto_send_allowed.isChecked(),
                        reading_backend=self.reading_backend.currentData(),
                        reading_base_url=self.reading_base.text().strip(),
@@ -991,7 +996,7 @@ class MainWindow(QMainWindow):
     def __init__(self, config=None, scanning=True, window_manager=None, account_store=None,
                  inference_queue=None):
         super().__init__()
-        self.setWindowTitle("微信实时助手 · 便捷版 0.5.12")
+        self.setWindowTitle("微信实时助手 · 便捷版 0.5.13")
         self.resize(1000, 520)
         self.setMinimumSize(900, 500)
         self.setStyleSheet(STYLE)
@@ -1134,10 +1139,10 @@ class MainWindow(QMainWindow):
         self.analysis_status.setWordWrap(False)
         self.analysis_status.setMinimumWidth(50)
         chat_header.addWidget(self.analysis_status)
-        self.floating_button = QPushButton("悬浮窗")
+        self.floating_button = QPushButton("悬浮球")
         self.floating_button.setToolTip(
-            "只显示原生微信窗口状态与分析按钮；其余功能在主界面保留")
-        self.floating_button.clicked.connect(self.toggle_floating)
+            "主界面只保留设置/历史；聊天的状态、分析和 AI 建议都在悬浮球")
+        self.floating_button.clicked.connect(self.enter_ball_mode)
         chat_header.addWidget(self.floating_button)
         chat_layout.addLayout(chat_header)
 
@@ -1593,30 +1598,62 @@ class MainWindow(QMainWindow):
         self.ai_toggle.setChecked(visible)
         self.ai_toggle.setToolTip("收起 AI 建议" if visible else "展开 AI 建议")
 
-    def toggle_floating(self):
-        """Switch between the full main window and the compact floating view.
-
-        The floating window is only a view: capture/analysis keep running in this
-        MainWindow while it is hidden.
-        """
+    def _ensure_floating(self):
         if getattr(self, "floating", None) is None:
             from .floating import FloatingAssistant
             self.floating = FloatingAssistant(self)
-        floating = self.floating
-        if floating.isVisible():
-            floating.hide()
-            self.show()
-            self.raise_()
-            self.activateWindow()
-            return
+        return self.floating
+
+    def _set_ball_mode_ui(self, active):
+        """Ball mode hides the chat/preview page; the main window is settings+history."""
+        self.nav_chat.setVisible(not active)
+        self.ai_toggle.setVisible(not active)
+        if active:
+            self.ai_panel.setVisible(False)
+            self.show_settings()
+
+    def enter_ball_mode(self):
+        floating = self._ensure_floating()
+        self._ball_mode_entered = True
         screen = self.screen()
-        if screen is not None:
+        if screen is not None and not floating.isVisible():
             area = screen.availableGeometry()
-            floating.move(area.right() - floating.width() - 24, area.top() + 80)
-        floating.refresh()
+            floating.move(area.right() - floating.width() - 28, area.top() + 90)
+        self.config["floating_ball"] = True
+        self._set_ball_mode_ui(True)
+        self._persist_ball_mode()
         floating.show()
         floating.raise_()
         self.hide()
+
+    def exit_ball_mode(self):
+        floating = getattr(self, "floating", None)
+        if floating is not None:
+            floating.hide()
+        self.config["floating_ball"] = False
+        self._set_ball_mode_ui(False)
+        self._persist_ball_mode()
+        self.show()
+
+    def _persist_ball_mode(self):
+        try:
+            settings.save(self.config)
+        except (OSError, ValueError, TypeError):
+            pass
+
+    def toggle_floating(self):
+        """Backwards-compatible alias: the ball is the compact primary mode."""
+        if getattr(self, "floating", None) is not None and self.floating.isVisible():
+            self.exit_ball_mode()
+        else:
+            self.enter_ball_mode()
+
+    def showEvent(self, event):  # noqa: N802 - Qt API
+        super().showEvent(event)
+        if (self.config.get("floating_ball")
+                and not getattr(self, "_ball_mode_entered", False)):
+            self._ball_mode_entered = True
+            QTimer.singleShot(0, self.enter_ball_mode)
 
     def set_connection_status(self, text):
         self.connection_status.setText(text)
@@ -1642,6 +1679,8 @@ class MainWindow(QMainWindow):
                            != backends.reading_backend(config))
         codex_changed = ((self.config.get("codex_path") or "").strip()
                          != (config.get("codex_path") or "").strip())
+        ball_changed = (bool(self.config.get("floating_ball"))
+                        != bool(config.get("floating_ball")))
         self.config = dict(config)
         self.settings_page.config = dict(config)
         self.settings_page.update_chatgpt_state(self.config)
@@ -1666,6 +1705,11 @@ class MainWindow(QMainWindow):
             self.stop_capture()
             self.connect_item(target)
         self.scan()
+        if ball_changed:
+            if config.get("floating_ball"):
+                QTimer.singleShot(0, self.enter_ball_mode)
+            else:
+                QTimer.singleShot(0, self.exit_ball_mode)
         warnings = []
         if (backends.analysis_backend(self.config) == "codex"
                 or backends.reading_backend(self.config) == "codex") \
@@ -3185,6 +3229,14 @@ class MainWindow(QMainWindow):
         self.show_settings()
 
     def closeEvent(self, event):
+        # In ball mode the main window is the settings/history editor; closing it
+        # returns to the ball instead of quitting the whole assistant.
+        if (getattr(self, "floating", None) is not None
+                and self.floating.isVisible()
+                and self.config.get("floating_ball")):
+            self.hide()
+            event.ignore()
+            return
         # Break widget -> window bound-method connections before Qt destroys the
         # widgets; otherwise the Python/Qt ownership cycle can crash on shutdown.
         for signal, slot_name in ((self.settings_page.account_action, "_account_action_slot"),
