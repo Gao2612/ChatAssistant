@@ -26,6 +26,43 @@ class CatalogRegressionTests(unittest.TestCase):
             page.commit()
         self.assertEqual(save.call_args[0][0]['model'], 'vendor-supported-id')
 
+    def test_long_api_ids_remain_distinct_through_selection(self):
+        from liteapp import analysis
+        ids = ['vendor/' + 'x' * 220 + suffix for suffix in ('/first', '/second')]
+        rows = [{'id': value, 'display_name': 'Friendly'} for value in ids]
+        with patch('liteapp.analysis.request_get_json', return_value={'data': rows + rows[:1]}):
+            catalog = analysis.list_models({'backend': 'api', 'base_url': 'https://example.test/v1',
+                                            'api_key': 'synthetic'})
+        self.assertEqual([value for _, value in catalog], ids)
+        page = self.page(backend='api', api_model=ids[1])
+        page.models_checked(catalog, '')
+        with patch('liteapp.ui.settings.save') as save:
+            page.commit()
+        self.assertEqual(save.call_args[0][0]['model'], ids[1])
+
+    def test_long_account_catalog_ids_roundtrip_without_collision(self):
+        import tempfile
+        from liteapp import account_store, settings
+        from tests.test_accounts import credentials
+        ids = ['catalog/' + 'y' * 220 + suffix for suffix in ('/first', '/second')]
+        catalog = [('Friendly', value) for value in ids]
+        # Isolate the OS credential vault; exercise real catalog/settings disk IO.
+        with patch('liteapp.settings.crypt', side_effect=lambda data, decrypt=False: data), \
+                tempfile.TemporaryDirectory(prefix='lite-long-catalog-') as folder:
+            store = account_store.AccountStore(folder)
+            registration = store.save_credentials(None, credentials())
+            store.update_model_catalog(registration.registration_id, catalog + catalog[:1])
+            reopened = account_store.AccountStore(folder)
+            self.assertEqual(reopened.model_catalog(registration.registration_id), catalog)
+            config = settings.load(folder)
+            config.update(backend='chatgpt', chatgpt_model=ids[1], model=ids[1])
+            settings.save(config, folder)
+            restored = settings.load(folder)
+            self.assertEqual(restored['chatgpt_model'], ids[1])
+            self.assertEqual(restored['subscription_models'], [list(row) for row in catalog])
+            self.assertEqual(account_store.AccountStore(folder).model_catalog(
+                registration.registration_id), catalog)
+
     def test_legacy_display_name_does_not_silently_select_first_api_model(self):
         # Older settings could persist a UI label instead of the endpoint's ID.
         # Refreshing /models must not guess that the first result is its replacement.

@@ -57,18 +57,20 @@ class BallFace(QWidget):
     def paintEvent(self, event):  # noqa: N802 - Qt API
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        rect = QRectF(4, 4, self.width() - 8, self.height() - 8)
+        rect = QRectF(3, 3, self.width() - 6, self.height() - 6)
         gradient = QLinearGradient(rect.topLeft(), rect.bottomRight())
         gradient.setColorAt(0.0, QColor("#1B806B"))
-        gradient.setColorAt(1.0, QColor("#0F483D"))
+        gradient.setColorAt(1.0, QColor("#0B3A32"))
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(gradient)
         painter.drawEllipse(rect)
 
-        track_pen = QPen(QColor(255, 255, 255, 55), 4)
+        # progress ring around the cream core
+        arc = QRectF(rect.left() + 5, rect.top() + 5,
+                     rect.width() - 10, rect.height() - 10)
+        track_pen = QPen(QColor(255, 255, 255, 48), 4)
         track_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         painter.setPen(track_pen)
-        arc = QRectF(rect.left() + 5, rect.top() + 5, rect.width() - 10, rect.height() - 10)
         painter.drawArc(arc, 90 * 16, -360 * 16)
         if self._score is not None:
             progress_pen = QPen(QColor("#9BE7C9"), 4)
@@ -77,20 +79,33 @@ class BallFace(QWidget):
             span = max(0, min(100, int(self._score))) * 360 / 100
             painter.drawArc(arc, 90 * 16, -int(span * 16))
 
-        painter.setPen(QColor("#FFFFFF"))
+        # soft cream core with a thin highlight rim, like a floating capsule
+        core = rect.adjusted(10, 10, -10, -10)
+        painter.setPen(QPen(QColor(255, 255, 255, 120), 1.2))
+        painter.setBrush(QColor("#F7F5EE"))
+        painter.drawEllipse(core)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(23, 107, 91, 18))
+        painter.drawEllipse(QRectF(core.left() + 6, core.top() + 7,
+                                   core.width() - 12, core.height() * 0.42))
+
+        painter.setPen(QColor("#176B5B"))
         font = painter.font()
-        font.setPointSizeF(15 if self._score is None else 13)
+        font.setPointSizeF(16 if self._score is None else 17)
         font.setBold(True)
         painter.setFont(font)
         text = "AI" if self._score is None else str(int(self._score))
-        painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, text)
+        painter.drawText(core, Qt.AlignmentFlag.AlignCenter, text)
         if self._favorite:
+            badge = QRectF(rect.right() - 24, rect.bottom() - 24, 20, 20)
+            painter.setPen(QPen(QColor("#F7F5EE"), 2))
+            painter.setBrush(QColor("#9BE7C9"))
+            painter.drawEllipse(badge)
             heart_font = painter.font()
             heart_font.setPointSizeF(8)
             painter.setFont(heart_font)
-            painter.setPen(QColor("#9BE7C9"))
-            painter.drawText(QRectF(rect.left(), rect.bottom() - 20, rect.width(), 16),
-                             Qt.AlignmentFlag.AlignCenter, "♥ 已固定")
+            painter.setPen(QColor("#0F483D"))
+            painter.drawText(badge, Qt.AlignmentFlag.AlignCenter, "♥")
 
 
 class FloatingAssistant(QWidget):

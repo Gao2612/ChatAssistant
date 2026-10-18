@@ -97,6 +97,22 @@ class ModelProfileUiTests(unittest.TestCase):
                     time.sleep(0.01)
         start.assert_called_once_with(self.scope, automatic=True)
 
+    def test_bind_current_without_selection_opens_named_profile(self):
+        self.window.history_page.set_current_scope(None)
+        self.window._epoch_title = "田子夜"
+        self.window.chat_title.setText("田子夜")
+        self.window.window_item = {"hwnd": 4321, "pid": 4322, "created": 1.0,
+                                   "path": "C:/Program Files/Tencent/Weixin/Weixin.exe"}
+        self.window.bind_current_conversation()
+        self.app.processEvents()
+        scope = self.window.history_page.current_scope()
+        self.assertIsNotNone(scope)
+        self.assertEqual(self.window.history_page.tabs.currentIndex(), 1)
+        self.assertIn("田子夜", self.window.history_page.contact_label.text())
+        self.assertIn("田子夜", self.window.notice.text())
+        profile = self.window._contact_profiles.get("田子夜", scope.person_id)
+        self.assertIsNotNone(profile)
+
     def test_ball_shows_model_profile_fields(self):
         profile = ContactProfile(
             title="测试客户", scope_person_id=self.scope.person_id,

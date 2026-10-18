@@ -116,6 +116,7 @@ def masked_email(config):
 
 
 def describe_analysis(config):
+    # Summary intentionally shows the callable ID; dropdowns show friendly labels.
     backend = analysis_backend(config)
     label = ANALYSIS_SHORT.get(backend, backend)
     model = effective_model(config) or "未配置模型"

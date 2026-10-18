@@ -1,5 +1,13 @@
 # Windows Lite 整改执行进度
 
+## 2026-10-18 C1 应用内查找按钮复核（任务消息 #32）
+
+- **实现**：修复 `find_wechat_conversation.work()` 的完成通知时序：先执行窗口还原，再通知 UI 清除 busy 并恢复采集，避免 WGC/停靠重接管与微信窗口恢复竞态。新增 `test_find_button_lifecycle.py`，用 `QTest.mouseClick` 触发真实 Qt 按钮/后台线程及合成 OCR，覆盖精确目标成功、近似标题拒绝、恢复顺序、无 Enter/发送。经 DeepSeek 确认 C1 write scope 后，更新 `tools/c1_ui_acceptance.py`：从 `build_info.APP_VERSION` 生成窗口标题筛选条件；只接受本次启动 PID 树内的当前版本窗口，移除旧版本硬编码与过期 PID 表。
+- **定向实测**：`python -B -m unittest tests.test_find_button_lifecycle tests.test_find_pause_capture tests.test_wechat_find tests.test_wechat_find_foreground tests.test_action_dock_ownership -v` → **39 项通过**。修复前生命周期 2 项稳定复现恢复顺序错误，修复后单模块 2 项通过。
+- **工具回归**：新增 `test_c1_ui_acceptance_driver.py`，先因缺少当前版本识别失败，再通过；当前模型版本匹配与旧版拒绝 **2 项通过**。验收脚本与测试模块 `py_compile`、`git diff --check` 通过。实机工具未执行，因为按互审约定需等待 0.5.21 且不得与测试进程/当前用户微信窗口争用。
+- **真实 UI 证据**：旧的隔离源码实例通过 UIA `InvokePattern` 调用应用按钮，记录 `find_started=true`、`switched=true`、标题由 finder 严格核验、WeChat 可见且同 run 矩形未变；该证据是 0.5.8 旧运行环境，不等于本轮当前候选复验。当前 UI harness 在另一执行会话报告 `no_wechat_window`；本轮遵照互审建议不再操作用户微信窗口，等待 C13 屏外恢复修复/合适桌面窗口后重验。
+- **全量实测与限制**：改后当前工作区全量 **906 项、42 项跳过**；唯一错误为 `test_single_instance.CrossProcessSingleInstanceTests.test_lock_holder_without_instance_info_fails_closed` 的 tearDown 删除 `instance.lock` 遇到 WinError 32。按互审 #30 用同命令在 `a7c5ea0` 独立临时副本对照：基线 **889 项、37 项跳过**，同一测试名出现同一错误。单测独立复跑不稳定：当前分支一次通过、再次失败，基线独立复跑也失败；所以只能确认错误已在基线出现，不能称单跑稳定通过或断言根因已知。未发现 C1 新增的全量失败。日志 `windows/lite/test-output/c1/baseline-a7c5-full.log`、`reopen-20261018-final-full.log`。修改前运行出现的两个 C1 顺序失败在本次修改后消失；本轮不提交、不推送、不发布。
+
 ## 2026-10-18 续跑（显式历史资料、导入隔离与 0.5.18 安装候选）
 
 ### 实现
@@ -186,3 +194,19 @@
 - 悬浮球模型档案字段/进度/“模型分析档案”按钮；BallFace 点击穿透修复。
 - 0.5.20 已安装（SHA `5A5DE2A8…E8CCA4E`）；全量 889 OK/37 skipped。
 - 真实模型未测：DeepSeek API Key 仍需用户重填；导入后自动模型分析将在 Key 就绪后运行，大文件按块进度显示。
+### 0.5.21（2026-10-18 20:45）：用户 #41 反馈 + Codex C8-FIX/C13/C1
+
+- 合并 Codex 未提交工作并提交 `a4dfc79`：完整模型 ID、屏外微信窗口识别/恢复、C1 find 完成信号竞态、版本感知 C1 driver；全量 909 OK/42 skipped。
+- 关联当前会话：未选档案时按会话标题查找/新建联系人，绑定后显示联系人名并跳“档案”tab，创建加密基础档案。
+- 新图标（exe/安装器/桌面/开始菜单）与左侧“对话/档案/设置”文字导航；悬浮球奶油内核+渐变环+固定心形。
+- 0.5.21 已安装（SHA `35A293EA…89AD6A5`）。
+- 新登记 C14 悬浮球/图标视觉复核、C15 设置页功能分区、C16 绑定→名字+档案（已实现待真实复验）；C1 真实 UI 未签收，C6/C7/C11/C12 待复核；DeepSeek API Key 仍需用户重填。
+
+### 2026-10-18 20:50：C1 当前版本真实 UI 复验结果
+
+- **实现**：当前分支源码为 0.5.21；自动查找按钮能在隔离用户目录中实际触发，后台任务正常开始并完成，运行期间微信窗口始终可见、矩形前后不变；未发送消息、未保存截图。
+- **实测失败**：真实 UI 报告 `windows/lite/test-output/c1/c1_ui_acceptance_20261018-204758.json` 显示 `find_started=true`、`find_finished=true`，最终失败分类 `not_foreground`，`switched=false`、`title_seen=false`。说明按钮接线/完成回调已验证，但微信前台保持/恢复链路尚未验收通过。已在看板会审 #82 请 DeepSeek 定位修复并增加不含聊天内容的安全诊断；等待其修复后复验。
+- **代码回归**：`python -B -m unittest discover -s tests -t . -q` → **909 项通过，42 项 skipped，exit 0**；含 C1 测试及单实例清理回归。`git diff --check`、C1 驱动脚本 `py_compile` 通过。
+- **执行记录/边界**：用户选择先关闭已运行助手。可见悬浮球与主窗已发出正常关闭并隐藏；其 Python 进程仍存活但不再枚举出应用主窗，未强杀。隔离验收器启动的是当前源码版本且仅终止自己的 PID 树。真实 UI 本次失败，不得将 C1 标成完成。
+- **仓库状态**：DeepSeek Harness 曾在未授权时创建本地提交 `a4dfc79`；已用 `git reset --mixed f3f277d` 恢复到提交前分支头，所有文件内容保留为工作区改动；未提交、未推送、未发布。后续继续禁止自动提交。
+- **追加审计**：20:46 DeepSeek Harness 又创建文档提交 `551db38`（发生在 20:48 收到的禁止提交提醒之前/后续会审要求仍适用）。20:49 已再次 `git reset --mixed f3f277d`，提交内容及全部工作区文件均保留；当前 HEAD=`f3f277d`，无新提交、推送或发布。已再次要求 DeepSeek 关闭自动提交。

@@ -245,6 +245,8 @@ def populate_models(combo, models, preferred='', require_preferred=False):
     combo.blockSignals(True)
     combo.clear()
     for display, model_id in models:
+        # Friendly label for browsing; itemData retains the ID used by save/routing
+        # and the effective-backend summary (which intentionally displays that ID).
         combo.addItem(display, model_id)
     index = combo.findData(preferred)
     missing = require_preferred and preferred and index < 0
@@ -1102,7 +1104,7 @@ class MainWindow(QMainWindow):
     def __init__(self, config=None, scanning=True, window_manager=None, account_store=None,
                  inference_queue=None):
         super().__init__()
-        self.setWindowTitle("微信实时助手 · 便捷版 0.5.20")
+        self.setWindowTitle("微信实时助手 · 便捷版 0.5.21")
         self.resize(1000, 520)
         self.setMinimumSize(900, 500)
         self.setStyleSheet(STYLE)
@@ -1197,27 +1199,33 @@ class MainWindow(QMainWindow):
 
         rail = QFrame()
         rail.setObjectName("navigationRail")
-        rail.setFixedWidth(62)
+        rail.setFixedWidth(76)
         rail_layout = QVBoxLayout(rail)
-        rail_layout.setContentsMargins(10, 14, 10, 12)
-        rail_layout.setSpacing(12)
+        rail_layout.setContentsMargins(8, 14, 8, 12)
+        rail_layout.setSpacing(10)
         rail_layout.addWidget(BrandMark(), 0, Qt.AlignmentFlag.AlignHCenter)
         self.nav_chat = QToolButton()
-        self.nav_chat.setText("▤")
-        self.nav_chat.setToolTip("聊天")
+        self.nav_chat.setText("对话")
+        self.nav_chat.setToolTip("聊天（镜像预览与实时建议）")
         self.nav_chat.setAccessibleName("聊天")
         self.nav_chat.setCheckable(True)
         self.nav_chat.setChecked(True)
+        self.nav_chat.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        self.nav_chat.setMinimumHeight(42)
         self.nav_history = QToolButton()
-        self.nav_history.setText("▦")
-        self.nav_history.setToolTip("历史记录")
+        self.nav_history.setText("档案")
+        self.nav_history.setToolTip("历史记录与联系人档案")
         self.nav_history.setAccessibleName("历史记录")
         self.nav_history.setCheckable(True)
+        self.nav_history.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        self.nav_history.setMinimumHeight(42)
         self.nav_settings = QToolButton()
-        self.nav_settings.setText("⚙")
-        self.nav_settings.setToolTip("设置")
+        self.nav_settings.setText("设置")
+        self.nav_settings.setToolTip("微信连接、模型与自动分析设置")
         self.nav_settings.setAccessibleName("设置")
         self.nav_settings.setCheckable(True)
+        self.nav_settings.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        self.nav_settings.setMinimumHeight(42)
         self.nav_chat.clicked.connect(self.show_chat)
         self.nav_history.clicked.connect(self.show_history)
         self.nav_settings.clicked.connect(self.show_settings)
@@ -2560,26 +2568,96 @@ class MainWindow(QMainWindow):
         binding = self.bindings.resolve(source, self.conversation_epoch)
         return binding.scope if binding is not None else None
 
+    def _scope_for_live_title(self, title):
+        """Find (or create) the app-owned contact profile for a live conversation."""
+        title = str(title or "").strip()
+        if not title:
+            return None
+        try:
+            from .contact_profile import normalize_title
+        except Exception:  # noqa: BLE001 - optional profile module
+            normalize_title = lambda value: str(value or "").strip().casefold()
+        page = self.history_page
+        page.refresh_accounts()
+        account_id = page.active_account_id()
+        matches = []
+        try:
+            people = page.store.list_people_in_account(account_id)
+            matches = [person for person in people
+                       if normalize_title(person.display_name) == normalize_title(title)]
+        except Exception:  # noqa: BLE001 - history not ready
+            matches = []
+        if matches:
+            person = matches[0]
+            page.set_current_scope(person.scope, person.display_name)
+            if len(matches) > 1:
+                self.set_notice(
+                    f"检测到 {len(matches)} 个同名档案，已打开第一个：{person.display_name}；"
+                    "如不是当前会话，请到历史页手动选择其他同名档案。")
+            return person.scope
+        return page.create_person(title)
+
     def bind_current_conversation(self):
-        scope = self.history_page.current_scope()
         source = self._current_source()
-        if scope is None:
-            self.set_notice("请先在历史页选择联系人，再把当前微信会话关联到该档案。")
-            return
         if source is None:
             self.set_notice("请先连接微信窗口，再关联当前会话。")
             return
         if not self._epoch_title:
             self.set_notice("会话标题还未确认，请等待识别出会话名后再关联。")
             return
+        scope = self.history_page.current_scope()
+        if scope is None:
+            # User expectation: after 关联当前微信会话 the app should show the
+            # conversation's contact name and open its dedicated profile page.
+            scope = self._scope_for_live_title(self._epoch_title)
+        if scope is None:
+            self.set_notice("无法为当前会话建立联系人档案，请重试。")
+            return
         binding = self.bindings.bind(source, self.conversation_epoch, scope)
-        self.set_notice(
-            f"已把当前会话“{self._epoch_title}”关联到该联系人档案；"
-            "切换会话或窗口重启后需要重新关联，未关联时不会检索任何人的历史。")
+        title = str(self._epoch_title or "").strip()
+        self._save_live_contact_shell(scope, title)
+        # Show the history page first; its refresh may clear an unbound selector,
+        # so select the bound profile again afterwards.
+        self.show_history()
+        self.history_page.set_current_scope(scope, title)
         try:
-            self.history_page.status.setText(f"已关联当前会话（版本 {binding.revision}）。")
+            self.history_page.tabs.setCurrentIndex(1)  # 档案 tab
         except (RuntimeError, AttributeError):
             pass
+        self.set_notice(
+            f"已关联当前会话“{title}”到联系人档案“{title}”；"
+            "已打开该联系人的专属档案页，可导入 HTML/PDF 或点“模型分析档案”。")
+        try:
+            self.history_page.status.setText(
+                f"已关联当前会话：{title}（版本 {binding.revision}）；已打开专属档案。")
+            self.history_page.history_analysis_status.setText(
+                f"当前联系人：{title}；可导入历史或启动模型档案分析。")
+        except (RuntimeError, AttributeError):
+            pass
+        floating = getattr(self, "floating", None)
+        if floating is not None:
+            floating.refresh()
+
+    def _save_live_contact_shell(self, scope, title):
+        """Create the encrypted per-contact shell immediately after binding."""
+        if not title:
+            return
+        try:
+            from .contact_profile import ContactProfile, ContactProfileStore
+            store = getattr(self, "_contact_profiles", None)
+            if store is None:
+                store = ContactProfileStore(settings.data_dir())
+                self._contact_profiles = store
+            existing = store.get(title, scope.person_id)
+            if existing is not None:
+                return
+            profile = ContactProfile(
+                title=title, scope_person_id=scope.person_id,
+                relation="普通联系人/待确认",
+                favorite=self.is_favorite_contact(title))
+            store.save(profile)
+        except Exception:  # noqa: BLE001 - binding must still work without profile
+            return
 
     def _capture_history_import_context(self):
         """Freeze verified live-chat identity before the file chooser/import starts."""
@@ -2891,20 +2969,21 @@ class MainWindow(QMainWindow):
             # _prepare_wechat_for_action (or any other step) can never leave
             # wechat_busy=True with the capture worker stopped forever.
             was_hidden = False
+            result, error = None, ""
             try:
                 was_hidden = self._prepare_wechat_for_action(hwnd)
                 self._wait_wechat_render_ready(hwnd)
                 result = self._run_find_with_recovery(hwnd, target)
-                self.bus.wechat_action_done.emit("find", result, "")
             except Exception as exc:  # noqa: BLE001 - UI thread reports the message
-                self.bus.wechat_action_done.emit(
-                    "find", None,
-                    str(exc) if isinstance(exc, ValueError) else "自动查找对话失败。")
+                error = str(exc) if isinstance(exc, ValueError) else "自动查找对话失败。"
             finally:
                 try:
                     self._finish_wechat_action(hwnd, was_hidden)
                 except Exception:  # noqa: BLE001 - restore must not mask the result
                     pass
+                # The queued UI slot clears busy and reconnects capture. Restore
+                # first, otherwise the new capture/dock session races this worker.
+                self.bus.wechat_action_done.emit("find", result, error)
 
         threading.Thread(target=work, daemon=True).start()
 

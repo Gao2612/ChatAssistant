@@ -44,6 +44,13 @@ u32.GetWindowLongW.argtypes = [W.HWND, ctypes.c_int]
 u32.GetWindowLongW.restype = ctypes.c_long
 u32.ShowWindow.argtypes = [W.HWND, ctypes.c_int]
 u32.ShowWindow.restype = W.BOOL
+u32.MonitorFromRect.argtypes = [ctypes.POINTER(W.RECT), W.DWORD]
+u32.MonitorFromRect.restype = W.HANDLE
+u32.SetWindowPos.argtypes = [W.HWND, W.HWND, ctypes.c_int, ctypes.c_int,
+                            ctypes.c_int, ctypes.c_int, W.UINT]
+u32.SetWindowPos.restype = W.BOOL
+u32.SystemParametersInfoW.argtypes = [W.UINT, W.UINT, ctypes.c_void_p, W.UINT]
+u32.SystemParametersInfoW.restype = W.BOOL
 k32.OpenProcess.argtypes = [W.DWORD, W.BOOL, W.DWORD]
 k32.OpenProcess.restype = W.HANDLE
 k32.QueryFullProcessImageNameW.argtypes = [W.HANDLE, W.DWORD, W.LPWSTR, ctypes.POINTER(W.DWORD)]
@@ -239,6 +246,25 @@ def window_cloaked(hwnd):
         return False
 
 
+def window_offscreen(hwnd):
+    """True only when a readable rectangle intersects no actual monitor."""
+    bounds = window_rect(hwnd)
+    if bounds is None:
+        return False
+    rect = W.RECT(*bounds)
+    return not bool(u32.MonitorFromRect(ctypes.byref(rect), 0))
+
+
+def _recover_offscreen(hwnd):
+    if not window_offscreen(hwnd):
+        return True
+    work = W.RECT()
+    if not u32.SystemParametersInfoW(0x0030, 0, ctypes.byref(work), 0):
+        return False
+    # Primary work area; preserve size/Z-order and never activate while moving.
+    return bool(u32.SetWindowPos(hwnd, 0, work.left, work.top, 0, 0, 0x0015))
+
+
 def window_status(hwnd):
     """Lifecycle status string for one window (visible/minimized/hidden/cloaked)."""
     hwnd = int(hwnd)
@@ -246,7 +272,7 @@ def window_status(hwnd):
         return STATUS_CLOAKED
     if u32.IsIconic(hwnd):
         return STATUS_MINIMIZED
-    if u32.IsWindowVisible(hwnd):
+    if u32.IsWindowVisible(hwnd) and not window_offscreen(hwnd):
         return STATUS_VISIBLE
     return STATUS_HIDDEN
 
@@ -268,7 +294,9 @@ def window_info(hwnd):
     class_name = window_class_name(hwnd)
     owner = window_owner(hwnd)
     visible = bool(u32.IsWindowVisible(hwnd))
+    offscreen = window_offscreen(hwnd)
     minimized = bool(u32.IsIconic(hwnd))
+    visible = visible and (minimized or not offscreen)
     cloaked = window_cloaked(hwnd)
     if cloaked:
         status = STATUS_CLOAKED
@@ -287,6 +315,7 @@ def window_info(hwnd):
         "owner": owner,
         "visible": visible,
         "hidden": not visible,
+        "offscreen": offscreen,
         "minimized": minimized,
         "cloaked": cloaked,
         "status": status,
@@ -379,6 +408,8 @@ def discover(path, include_hidden=False):
             return
         info = window_info(hwnd)
         if info is None or info["kind"] not in (KIND_CHAT, KIND_LOGIN):
+            return
+        if not include_hidden and info.get("offscreen") and not info["minimized"]:
             return
         result.append(_window_item(info, identity))
     _collect_windows(collect)
@@ -735,7 +766,8 @@ def restore_window(window, *, activate=False):
     Default behaviour never calls a force-foreground API: hidden windows are
     shown with ``SW_SHOWNOACTIVATE`` (verified to keep the foreground window
     unchanged) and there is no looping. Only the explicit "启动/连接" button may
-    pass ``activate=True``; it then uses the native ``SW_RESTORE`` semantics.
+    pass ``activate=True``; it first moves wholly offscreen windows to the
+    primary work area, then uses native ``SW_RESTORE`` semantics.
     Note: Windows itself may activate a *minimized* window while un-minimizing
     it even with ``SW_SHOWNOACTIVATE``; this module still never calls
     SetForegroundWindow and never raises a window on its own.
@@ -753,10 +785,16 @@ def restore_window(window, *, activate=False):
             # shown with ShowWindow; do not pretend they were restored.
             return False
         if activate:
+            if not _recover_offscreen(hwnd):
+                return False
             u32.ShowWindow(hwnd, SW_RESTORE)
             if not u32.IsWindowVisible(hwnd):
                 u32.ShowWindow(hwnd, SW_SHOW)
-            return bool(u32.IsWindowVisible(hwnd))
+            # Un-minimizing may restore a separate, previously parked rectangle.
+            if not _recover_offscreen(hwnd):
+                return False
+            return bool(u32.IsWindowVisible(hwnd) and not u32.IsIconic(hwnd)
+                        and not window_offscreen(hwnd))
         u32.ShowWindow(hwnd, SW_SHOWNOACTIVATE)
         if not u32.IsWindowVisible(hwnd):
             # SW_SHOWNA ("show, keep active window active") for windows hidden

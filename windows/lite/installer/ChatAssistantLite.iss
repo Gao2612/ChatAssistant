@@ -1,5 +1,5 @@
 #define AppName "ChatAssistant Lite"
-#define AppVersion "0.5.20"
+#define AppVersion "0.5.21"
 #define AppExeName "ChatAssistantLite.exe"
 
 [Languages]
@@ -14,6 +14,7 @@ AppPublisher=ChatAssistant
 DefaultDirName={localappdata}\Programs\ChatAssistantLite
 DefaultGroupName={#AppName}
 UninstallDisplayIcon={app}\{#AppExeName}
+SetupIconFile=..\assets\ChatAssistant.ico
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=lowest
 #if Defined(VerificationBuild)
@@ -39,8 +40,8 @@ Source: "..\dist-release\ChatAssistantLite\*"; DestDir: "{app}"; Flags: ignoreve
 
 #if !Defined(VerificationBuild)
 [Icons]
-Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExeName}"
-Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
+Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExeName}"; IconFilename: "{app}\{#AppExeName}"
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; IconFilename: "{app}\{#AppExeName}"; Tasks: desktopicon
 #endif
 
 [Run]

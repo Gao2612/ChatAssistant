@@ -223,7 +223,8 @@ def _normalize_catalog(models: Any) -> list[list[str]]:
         if not display or not slug or slug in seen:
             continue
         seen.add(slug)
-        catalog.append([display[:120], slug[:200]])
+        # Only labels may be shortened; preserve the full opaque routing ID on disk.
+        catalog.append([display[:120], slug])
     return catalog
 
 

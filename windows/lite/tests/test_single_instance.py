@@ -87,7 +87,16 @@ class _TempDataDir(unittest.TestCase):
         self.second_dir = Path(self._temp.name) / "profile-2"
 
     def tearDown(self):
-        self._temp.cleanup()
+        # The just-finished cross-process child may still be releasing
+        # instance.lock for a few milliseconds; a teardown-only PermissionError
+        # must not fail the suite.
+        for _attempt in range(10):
+            try:
+                self._temp.cleanup()
+                return
+            except PermissionError:
+                time.sleep(0.05)
+        self._temp.cleanup(ignore_cleanup_errors=True)
 
 
 class InProcessSingleInstanceTests(_TempDataDir):

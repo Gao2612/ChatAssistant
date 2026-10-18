@@ -1,4 +1,4 @@
-﻿r"""C1 real-UI acceptance driver (source-tree 0.5.8, isolated profile, no sending).
+﻿r"""C1 real-UI acceptance driver (current source version, isolated profile, no sending).
 
 Launches a separate ChatAssistantLite from the source tree with an isolated
 LOCALAPPDATA, then drives the settings page with native mouse/keyboard:
@@ -38,6 +38,15 @@ PYTHON = sys.executable
 
 from liteapp import build_info, discovery, settings  # noqa: E402
 from liteapp.wechat_actions import Win32Backend  # noqa: E402
+
+CURRENT_APP_VERSION = str(build_info.APP_VERSION)
+SOURCE_WINDOW_TITLE = f"微信实时助手 · 便捷版 {CURRENT_APP_VERSION}"
+
+
+def is_source_app_title(title):
+    """Match the current source build's app window without accepting stale installs."""
+    title = str(title or "")
+    return "微信实时助手" in title and CURRENT_APP_VERSION in title
 
 try:
     import uiautomation as auto
@@ -87,8 +96,7 @@ def window_metrics(hwnd):
     u32.GetWindowTextW(hwnd, title, 256)
     return {"hwnd": int(hwnd),
             "rect": [rect.left, rect.top, rect.right, rect.bottom],
-            "title_is_058": "0.5.8" in title.value,
-            "title_is_057": "0.5.7" in title.value,
+            "title_is_current_version": is_source_app_title(title.value),
             "status": discovery.window_status(int(hwnd))}
 
 
@@ -98,9 +106,6 @@ def window_pid(hwnd):
     return int(pid.value)
 
 
-# User's installed 0.5.7 instances are never touched (Lead-provided PIDs).
-OLD_USER_APP_PIDS = {5652, 23020, 34388}
-SOURCE_WINDOW_TITLE = "微信实时助手 · 便捷版 0.5.8"
 TH32CS_SNAPPROCESS = 0x00000002
 
 
@@ -158,7 +163,9 @@ def _descendants_of(root_pid, parents=None):
     return out
 
 
-def _window_pids_by_title(needle=SOURCE_WINDOW_TITLE):
+def _window_pids_by_title(needle=None):
+    if needle is None:
+        needle = SOURCE_WINDOW_TITLE
     pids = []
 
     @CALLBACK
@@ -199,18 +206,14 @@ def _process_image(pid):
 
 
 def scan_stale_source_instances(record=None):
-    """Record (never kill) foreign 0.5.8 source-tree windows for manual review.
+    """Record (never kill) foreign current-version source windows for review.
 
-    Other takeover agents also run isolated 0.5.8 source instances (e.g. C3); a
-    window title alone cannot prove ownership. Killing is therefore limited to
-    PIDs this script itself spawned; anything else is only reported here and left
-    to the Lead's coordination.
+    Other agents can run isolated source instances too; a window title alone
+    cannot prove ownership. Killing is therefore limited to PIDs this script
+    itself spawned; anything else is only reported and left untouched.
     """
     seen = []
     for pid in _window_pids_by_title():
-        if pid in OLD_USER_APP_PIDS:
-            seen.append({"pid": pid, "owner": "user_057", "image": None})
-            continue
         seen.append({"pid": pid, "owner": "foreign", "image": _process_image(pid)})
     if record is not None and seen:
         record.setdefault("stale_instances_seen", []).extend(seen)
@@ -225,7 +228,7 @@ def _kill_own_tree(pid):
 
 
 def find_app_window(child_pid, timeout=70.0):
-    """Visible 0.5.8 window owned by the process tree this run started."""
+    """Visible current-version window owned by the process tree this run started."""
     deadline = time.monotonic() + timeout
     candidates = []
 
@@ -235,7 +238,7 @@ def find_app_window(child_pid, timeout=70.0):
             return True
         title = ctypes.create_unicode_buffer(256)
         u32.GetWindowTextW(hwnd, title, 256)
-        if "微信实时助手" in title.value and "0.5.8" in title.value:
+        if is_source_app_title(title.value):
             candidates.append(int(hwnd))
         return True
 
@@ -410,7 +413,7 @@ def paste_text(hwnd, text):
 
 
 def activate_app(window_hwnd):
-    """Bring our isolated 0.5.8 window to the foreground (no window move/size)."""
+    """Bring our isolated source window to the foreground without moving/resizing it."""
     try:
         Win32Backend().activate(int(window_hwnd))
     except (OSError, RuntimeError, ValueError):
@@ -497,7 +500,7 @@ def main():
             print("ABORTED wechat_not_visible", flush=True)
             return 2
         stage("preflight_visible", {"wechat": report["wechat"]})
-        # Record (do NOT kill) any other 0.5.8 source instances: they may belong to
+        # Record (do NOT kill) other current-version source instances; they may belong to
         # another takeover agent (e.g. C3). Killing is limited to our own PID tree.
         seen = scan_stale_source_instances(report)
         stage("stale_scan", {"seen": seen})
@@ -514,12 +517,12 @@ def main():
         stage("child_started", {"pid": child.pid})
         app_hwnd = find_app_window(child.pid, timeout=70.0)
         if app_hwnd is None:
-            fail("0.5.8_app_window_not_found")
+            fail("current_source_app_window_not_found")
             return 2
         report["app_window"] = window_metrics(app_hwnd)
         report["app_window"]["pid"] = window_pid(app_hwnd)
-        if report["app_window"]["title_is_057"]:
-            fail("would_drive_installed_057_window")
+        if not report["app_window"]["title_is_current_version"]:
+            fail("source_app_version_mismatch")
             return 2
         app = app_node(app_hwnd)
         stage("app_window_found", {"hwnd": app_hwnd, "pid": report["app_window"]["pid"]})
@@ -690,7 +693,7 @@ def main():
             except subprocess.TimeoutExpired:
                 child.kill()
         # Terminate the GUI child only when it belongs to OUR launched PID tree;
-        # never another agent's 0.5.8 instance and never the user 0.5.7 app.
+        # never another agent's source instance or the installed user app.
         if child is not None and app_hwnd is not None and window_pid(app_hwnd) > 0:
             owner = window_pid(app_hwnd)
             parents = _parent_map()
@@ -699,7 +702,7 @@ def main():
             report["app_owner_in_own_tree"] = owner in mine
             if owner in mine:
                 _kill_own_tree(owner)
-        # Record any other 0.5.8 source instances for manual/Lead review (never kill).
+        # Record other current-version source instances for review (never kill).
         scan_stale_source_instances(report)
         # P2-10 postflight: WeChat must remain visible and keep its preflight rect.
         try:

@@ -440,5 +440,158 @@ class DiscoveryCompatibilityTests(NativeFixtureTestCase):
             self.assertEqual(default_item[key], hidden_item[key], key)
 
 
+
+class OffscreenWindowTests(NativeFixtureTestCase):
+    def parked(self):
+        fixture = self.wechat_fixture()
+        self.assertTrue(discovery.u32.SetWindowPos(fixture.hwnd, 0, -25600, -25600,
+                                                  0, 0, 0x0015))
+        return fixture
+
+    def test_parked_visible_window_is_hidden_in_status_and_discovery(self):
+        fixture = self.parked()
+        self.assertTrue(is_window_visible(fixture.hwnd))
+        self.assertEqual(discovery.window_status(fixture.hwnd), 'hidden')
+        info = discovery.window_info(fixture.hwnd)
+        self.assertTrue(info['hidden'])
+        self.assertFalse(info['visible'])
+        path = self.identity(fixture)['path']
+        self.assertFalse(any(int(item['hwnd']) == fixture.hwnd
+                             for item in discovery.discover(path)))
+        self.assertTrue(any(int(item['hwnd']) == fixture.hwnd
+                            for item in discovery.discover(path, include_hidden=True)))
+
+    def test_explicit_restore_moves_parked_window_back_to_screen(self):
+        fixture = self.parked()
+        self.assertTrue(discovery.restore_window(fixture.hwnd, activate=True))
+        self.assertEqual(discovery.window_status(fixture.hwnd), 'visible')
+        self.assertGreater(discovery.window_rect(fixture.hwnd)[0], -25600)
+
+    def test_nonactivating_restore_does_not_move_parked_window(self):
+        fixture = self.parked()
+        before = discovery.window_rect(fixture.hwnd)
+        discovery.restore_window(fixture.hwnd)
+        self.assertEqual(discovery.window_rect(fixture.hwnd), before)
+
+    def test_hidden_parked_window_restores_on_explicit_action(self):
+        fixture = self.parked()
+        hide_window(fixture.hwnd)
+        self.assertEqual(discovery.window_status(fixture.hwnd), 'hidden')
+        self.assertTrue(discovery.restore_window(fixture.hwnd, activate=True))
+        self.assertEqual(discovery.window_status(fixture.hwnd), 'visible')
+
+    def test_minimized_parked_window_keeps_minimized_status_then_restores(self):
+        fixture = self.parked()
+        fixture.command('minimize')
+        self.assertEqual(discovery.window_status(fixture.hwnd), 'minimized')
+        self.assertTrue(discovery.restore_window(fixture.hwnd, activate=True))
+        self.assertEqual(discovery.window_status(fixture.hwnd), 'visible')
+
+class OffscreenUnitTests(unittest.TestCase):
+    def setUp(self):
+        self.rect = (-25600, -25600, -24960, -25080)
+        self.visible = True
+        self.iconic = False
+        def move(hwnd, after, x, y, cx, cy, flags):
+            self.rect = (x, y, x + 640, y + 520)
+            return 1
+        def show(hwnd, command):
+            self.visible = True
+            self.iconic = False
+            return 1
+        def work_area(action, param, output, flags):
+            rect = ctypes.cast(output, ctypes.POINTER(W.RECT)).contents
+            rect.left, rect.top, rect.right, rect.bottom = 0, 0, 1920, 1040
+            return 1
+        patches = [
+            patch.object(discovery.u32, 'SystemParametersInfoW', side_effect=work_area),
+            patch.object(discovery, '_restore_target', return_value=123),
+            patch.object(discovery, 'window_cloaked', return_value=False),
+            patch.object(discovery, 'window_rect', side_effect=lambda hwnd: self.rect),
+            patch.object(discovery.u32, 'IsWindowVisible', side_effect=lambda hwnd: self.visible),
+            patch.object(discovery.u32, 'IsIconic', side_effect=lambda hwnd: self.iconic),
+            patch.object(discovery.u32, 'MonitorFromRect', side_effect=lambda rect, flags: int(self.rect[0] > -20000)),
+            patch.object(discovery.u32, 'SetWindowPos', side_effect=move),
+            patch.object(discovery.u32, 'ShowWindow', side_effect=show),
+        ]
+        for item in patches:
+            item.start()
+            self.addCleanup(item.stop)
+
+    def test_parked_status_is_hidden(self):
+        self.assertEqual(discovery.window_status(123), 'hidden')
+
+    def test_restore_active_recovers_parked_hidden_and_minimized(self):
+        for visible, iconic in [(True, False), (False, False), (True, True)]:
+            with self.subTest(visible=visible, iconic=iconic):
+                self.rect = (-25600, -25600, -24960, -25080)
+                self.visible, self.iconic = visible, iconic
+                self.assertTrue(discovery.restore_window(123, activate=True))
+                self.assertEqual(discovery.window_status(123), 'visible')
+                self.assertGreaterEqual(self.rect[0], 0)
+
+    def test_default_restore_preserves_position(self):
+        before = self.rect
+        discovery.restore_window(123)
+        self.assertEqual(self.rect, before)
+        discovery.u32.SetWindowPos.assert_not_called()
+
+    def test_minimized_and_hidden_status_preserved(self):
+        self.iconic = True
+        self.assertEqual(discovery.window_status(123), 'minimized')
+        self.iconic, self.visible = False, False
+        self.assertEqual(discovery.window_status(123), 'hidden')
+
+    def test_snapshot_and_discovery_exclude_parked_visible_window(self):
+        identity = {'pid': 7, 'path': normalize_path(WEIXIN), 'created': 9}
+        with patch.object(discovery.u32, 'IsWindow', return_value=True), \
+                patch.object(discovery, 'window_pid', return_value=7), \
+                patch.object(discovery, 'window_title', return_value='\u5fae\u4fe1'), \
+                patch.object(discovery, 'window_class_name', return_value='WeChatMainWnd'), \
+                patch.object(discovery, 'window_owner', return_value=0), \
+                patch.object(discovery.u32, 'GetWindow', return_value=0), \
+                patch.object(discovery.u32, 'GetWindowLongW', return_value=0), \
+                patch.object(discovery, 'dpi', return_value=96), \
+                patch.object(discovery, 'process_identity', return_value=identity), \
+                patch.object(discovery, '_collect_windows', side_effect=lambda collect: collect(123)):
+            info = discovery.window_info(123)
+            self.assertEqual(info['status'], 'hidden')
+            self.assertTrue(info['hidden'])
+            self.assertFalse(info['visible'])
+            self.assertEqual(discovery.discover(WEIXIN), [])
+            items = discovery.discover(WEIXIN, include_hidden=True)
+            self.assertEqual(len(items), 1)
+            self.assertEqual(items[0]['status'], 'hidden')
+
+    def test_monitor_intersection_keeps_partial_or_secondary_window_visible(self):
+        discovery.u32.MonitorFromRect.side_effect = None
+        discovery.u32.MonitorFromRect.return_value = 1
+        self.rect = (-640, 0, 20, 520)
+        self.assertEqual(discovery.window_status(123), 'visible')
+        self.assertTrue(discovery.restore_window(123, activate=True))
+        discovery.u32.SetWindowPos.assert_not_called()
+
+    def test_active_restore_moves_before_show_and_preserves_size_and_zorder(self):
+        events = []
+        move = discovery.u32.SetWindowPos.side_effect
+        show = discovery.u32.ShowWindow.side_effect
+        def ordered_move(*args):
+            events.append('move')
+            return move(*args)
+        def ordered_show(*args):
+            events.append('show')
+            return show(*args)
+        discovery.u32.SetWindowPos.side_effect = ordered_move
+        discovery.u32.ShowWindow.side_effect = ordered_show
+        self.assertTrue(discovery.restore_window(123, activate=True))
+        self.assertEqual(events, ['move', 'show'])
+        discovery.u32.SetWindowPos.assert_called_once_with(123, 0, 0, 0, 0, 0, 0x0015)
+
+    def test_position_failure_reports_false(self):
+        discovery.u32.SetWindowPos.side_effect = None
+        discovery.u32.SetWindowPos.return_value = 0
+        self.assertFalse(discovery.restore_window(123, activate=True))
+
+
 if __name__ == "__main__":
     unittest.main()

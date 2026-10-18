@@ -141,7 +141,8 @@ def list_models(config):
         model_id = row.get("id")
         if not isinstance(model_id, str) or not model_id.strip():
             continue
-        model_id = model_id.strip()[:200]
+        # Callable IDs are opaque; truncation can merge distinct catalog entries.
+        model_id = model_id.strip()
         if model_id in seen:
             continue
         seen.add(model_id)
