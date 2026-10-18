@@ -260,3 +260,12 @@
 - 导入后自动生成基础档案：关系定位 `普通联系人/待确认`、话题与重要日期（9月5日/12日/13日）已出，`model_analyzed=false`；模型逐句分析需用户重填 DeepSeek API Key
 - 结论：0.5.28 在安装版真实路径上修复确认；未发送任何消息、未保存真实聊天内容到仓库/文档/截图
 - 遗留小问题（不阻塞）：本地基础档案「常聊话题」把来源标签 `ExportWeChat HTML` 当成第 7 个话题，超出 `MAX_TOPIC_ITEMS=6`，应在话题切片前合并/裁剪
+### 候选包 0.5.29（基础档案话题上限修复，2026-10-18）
+
+- 版本 0.5.29；安装包 SHA-256 `14FC0ABC98BD45B1B9ACDDF5E5AA919266AACAB8357E81D4259DAE60112366B2`；exe SHA-256 `A95BC354E9A94739A9F0E196580B79EC457282BE070A745FF02ABE89BCBA51B8`
+- Git `52558f9`（dirty：仅版本号三处 + 文档）；168 源文件；`--version-json` = 0.5.29；隔离 `--self-test` exit 0；构建 smoke 通过
+- 修复：`auto_profile._topics_value` 的来源格式标签不再追加到 top-6 之后，而是先占名额（最多 6 个），关键词话题按命中次数补满剩余名额，总数恒 ≤ `MAX_TOPIC_ITEMS`
+- 真实数据复核（真实库副本 + 真实加密档案副本，未改用户数据）：`田子夜` 档案话题由 7 项降为 6 项 → `情感与关系 / 生活与家庭 / 健康与作息 / 预算与价格 / 库存与交期 / ExportWeChat HTML`；关系定位、重要日期、`model_analyzed=false` 不变
+- 已覆盖安装到 `E:\ChatAssistantLite`（注册表 `ChatAssistant Lite version 0.5.29`），启动后悬浮球正常
+- 全量 **934 tests OK / 42 skipped**
+- 仍需：C1 真实 UI、C3 真实弹窗/托盘、C6/C7/C9–C12/C14 复核、C15 设置页分区；真实模型分析需用户重填 DeepSeek API Key

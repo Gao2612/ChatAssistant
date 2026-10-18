@@ -227,3 +227,9 @@
 - 全量 933 tests OK/42 skipped；0.5.28 已安装（SHA `08A0400C…D474D12`）。
 - **安装版复验（2026-10-18 追加）**：在 `E:\ChatAssistantLite` 已安装 0.5.28 中走真实 UI（悬浮球→`档案 ↗`→历史页→`导入聊天记录`→真实路径→同名档案确认），界面报 `完成：1684 个文字片段，约 16912 字。`；直查数据库 `sources` 仍 1 行且 `source_id` 不变，`parser_version 1→exportwechat_json`、`record_count 13→1684`、`char_count 57→16912`、`import_version 1→2`、`failure_count 0`，`records` 1684 行、ordinal 0–1853、`sum(char_count)=16912`，`scope_state` 升到 source_set_version/memory_version 2。即安装版确认“旧残片原地升级为完整历史、无重复来源”。
 - **修复（同批）**：`auto_profile._topics_value` 原先把来源标签 `ExportWeChat HTML` 追加在 top-6 之后，常聊话题会出现第 7 项，超出 `MAX_TOPIC_ITEMS=6`；现改为来源标签先占名额（最多 6 个），关键词话题按命中次数补满剩余名额，总数恒不超上限且标签不被挤出；新增回归用例覆盖 8 类关键词 + HTML/PDF/ExportWeChat 三种来源。全量 **934 tests OK / 42 skipped**。
+### 0.5.29（2026-10-19 00:36）：基础档案话题上限修复
+
+- 版本号三处同步 0.5.29（`build_info.APP_VERSION`、主窗标题、安装器 `#define AppVersion`）；168 源文件；`--version-json`/隔离 `--self-test`/构建 smoke 全通过。
+- 真实数据复核（复制真实库与 `contact_profiles.dat` 到临时目录只读验证，未改用户数据）：`田子夜` 话题从 7 项降为 6 项，来源标签以“占名额”方式保留；关系定位/重要日期/`model_analyzed=false` 不变。
+- 安装包 SHA-256 `14FC0ABC…12366B2`；已覆盖安装到 `E:\ChatAssistantLite`，注册表显示 `ChatAssistant Lite version 0.5.29`，启动后悬浮球正常；全量 934 tests OK/42 skipped。
+- 安装过程提示：覆盖安装前需要先关闭已运行的 0.5.28（否则 Inno `CloseApplications` 无法自动关闭多进程树并回滚）；以后升级弹窗请先退出助手再运行安装包。
