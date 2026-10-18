@@ -1,0 +1,421 @@
+/* ChatAssistant Lite 统一基础样式表
+   唯一真源：docs/windows/UI_REDESIGN_2026-10-19.md 5.1-5.3。
+   所有颜色、字号、边框、圆角、间距与控件尺寸都用 token 占位，
+   由 liteapp.design.style_loader 在加载时替换；这里不写颜色字面量。
+   布局、尺寸计算、动态状态与动画由 Python 代码负责。 */
+
+/* ---------- 根窗口与文本 ---------- */
+
+QMainWindow, QWidget#appRoot {
+    background-color: @window-bg;
+    color: @text-primary;
+    font-family: @font-family;
+    font-size: @font-size-body;
+}
+
+QLabel {
+    background-color: transparent;
+    color: @text-primary;
+    font-size: @font-size-body;
+}
+
+/* ---------- 容器 ---------- */
+
+QFrame[role="card"] {
+    background-color: @surface;
+    border: @border-width solid @border;
+    border-radius: @radius-card;
+}
+
+QFrame[role="panel"] {
+    background-color: @surface-muted;
+    border: @border-width solid @border;
+    border-radius: @radius-card;
+}
+
+QFrame[role="divider"] {
+    background-color: @border;
+    border: 0;
+    max-height: @border-width;
+}
+
+/* ---------- 按钮：默认 / primary / ghost / danger ---------- */
+
+QPushButton {
+    background-color: @surface;
+    color: @text-primary;
+    border: @border-width solid @border-strong;
+    border-radius: @radius-button;
+    padding: @space-sm @space-lg;
+    min-height: @size-control;
+    font-size: @font-size-body;
+    font-weight: @font-weight-medium;
+}
+
+QPushButton:hover {
+    background-color: @surface-hover;
+    border-color: @accent-border;
+}
+
+QPushButton:pressed {
+    background-color: @surface-pressed;
+    border-color: @accent-border;
+}
+
+QPushButton:disabled {
+    background-color: @surface-muted;
+    color: @text-disabled;
+    border-color: @border;
+}
+
+QPushButton:focus {
+    border: @border-width-focus solid @focus;
+}
+
+QPushButton[variant="primary"] {
+    background-color: @accent;
+    color: @text-on-accent;
+    border-color: @accent;
+    font-weight: @font-weight-semibold;
+}
+
+QPushButton[variant="primary"]:hover {
+    background-color: @accent-hover;
+    border-color: @accent-hover;
+}
+
+QPushButton[variant="primary"]:pressed {
+    background-color: @accent-pressed;
+    border-color: @accent-pressed;
+}
+
+QPushButton[variant="primary"]:disabled {
+    background-color: @accent-disabled;
+    color: @text-on-accent;
+    border-color: @accent-disabled;
+}
+
+QPushButton[variant="primary"]:focus {
+    border: @border-width-focus solid @accent-pressed;
+}
+
+QPushButton[variant="ghost"] {
+    background-color: transparent;
+    color: @accent;
+    border-color: transparent;
+}
+
+QPushButton[variant="ghost"]:hover {
+    background-color: @accent-soft;
+    color: @accent-pressed;
+}
+
+QPushButton[variant="ghost"]:pressed {
+    background-color: @accent-soft-hover;
+}
+
+QPushButton[variant="ghost"]:disabled {
+    background-color: transparent;
+    color: @text-disabled;
+    border-color: transparent;
+}
+
+QPushButton[variant="ghost"]:focus {
+    border: @border-width-focus solid @focus;
+}
+
+QPushButton[variant="danger"] {
+    background-color: @danger;
+    color: @text-on-accent;
+    border-color: @danger;
+    font-weight: @font-weight-semibold;
+}
+
+QPushButton[variant="danger"]:hover {
+    background-color: @danger-hover;
+    border-color: @danger-hover;
+}
+
+QPushButton[variant="danger"]:pressed {
+    background-color: @danger-pressed;
+    border-color: @danger-pressed;
+}
+
+QPushButton[variant="danger"]:disabled {
+    background-color: @danger-soft;
+    color: @text-disabled;
+    border-color: @danger-border;
+}
+
+QPushButton[variant="danger"]:focus {
+    border: @border-width-focus solid @danger-pressed;
+}
+
+/* ---------- 输入控件 ---------- */
+
+QLineEdit, QPlainTextEdit, QComboBox, QSpinBox {
+    background-color: @surface;
+    color: @text-primary;
+    border: @border-width solid @border;
+    border-radius: @radius-input;
+    padding: @space-sm @space-md;
+    min-height: @size-control;
+    font-size: @font-size-body;
+    selection-background-color: @accent-soft;
+    selection-color: @accent-pressed;
+}
+
+QLineEdit:hover, QPlainTextEdit:hover, QComboBox:hover, QSpinBox:hover {
+    border-color: @accent-border;
+}
+
+QLineEdit:focus, QPlainTextEdit:focus, QComboBox:focus, QSpinBox:focus {
+    border: @border-width-focus solid @focus;
+}
+
+QLineEdit:disabled, QPlainTextEdit:disabled,
+QComboBox:disabled, QSpinBox:disabled {
+    background-color: @surface-muted;
+    color: @text-disabled;
+    border-color: @border;
+}
+
+QComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: center right;
+    width: @size-icon;
+    border: 0;
+    background-color: transparent;
+}
+
+QSpinBox::up-button, QSpinBox::down-button {
+    subcontrol-origin: border;
+    width: @size-icon;
+    border: 0;
+    background-color: transparent;
+}
+
+QSpinBox::up-button:hover, QSpinBox::down-button:hover {
+    background-color: @accent-soft;
+}
+
+QComboBox QAbstractItemView {
+    background-color: @surface;
+    color: @text-primary;
+    border: @border-width solid @border;
+    border-radius: @radius-button;
+    padding: @space-xs;
+    font-size: @font-size-secondary;
+    selection-background-color: @accent-soft;
+    selection-color: @accent-pressed;
+}
+
+/* ---------- 列表 / 树 / 表格 ---------- */
+
+QListWidget, QTreeView, QTableView {
+    background-color: @surface;
+    alternate-background-color: @surface-subtle;
+    color: @text-primary;
+    border: @border-width solid @border;
+    border-radius: @radius-card;
+    padding: @space-xs;
+    font-size: @font-size-secondary;
+    selection-background-color: @accent-soft;
+    selection-color: @accent-pressed;
+    gridline-color: @border;
+}
+
+QListWidget::item, QTreeView::item, QTableView::item {
+    color: @text-primary;
+    border-radius: @radius-input;
+    padding: @space-sm @space-md;
+}
+
+QListWidget::item:hover, QTreeView::item:hover, QTableView::item:hover {
+    background-color: @surface-hover;
+}
+
+QListWidget::item:selected, QTreeView::item:selected,
+QTableView::item:selected {
+    background-color: @accent-soft;
+    color: @accent-pressed;
+}
+
+QHeaderView::section {
+    background-color: @surface-muted;
+    color: @text-secondary;
+    border: 0;
+    border-bottom: @border-width solid @border;
+    padding: @space-sm @space-md;
+    font-weight: @font-weight-semibold;
+}
+
+/* ---------- 复选框 ---------- */
+
+QCheckBox {
+    color: @text-primary;
+    spacing: @space-sm;
+    font-size: @font-size-secondary;
+}
+
+QCheckBox:disabled {
+    color: @text-disabled;
+}
+
+QCheckBox::indicator {
+    width: @size-checkbox;
+    height: @size-checkbox;
+    background-color: @surface;
+    border: @border-width solid @border-strong;
+    border-radius: @radius-indicator;
+}
+
+QCheckBox::indicator:hover {
+    border-color: @accent;
+}
+
+QCheckBox::indicator:checked {
+    background-color: @accent;
+    border-color: @accent;
+}
+
+QCheckBox::indicator:checked:hover {
+    background-color: @accent-hover;
+    border-color: @accent-hover;
+}
+
+QCheckBox::indicator:disabled {
+    background-color: @surface-muted;
+    border-color: @border;
+}
+
+QCheckBox::indicator:checked:disabled {
+    background-color: @accent-disabled;
+    border-color: @accent-disabled;
+}
+
+/* ---------- 滚动条：细窄、无箭头、hover 加深 ---------- */
+
+QScrollBar:vertical {
+    background-color: transparent;
+    width: @size-scrollbar;
+    margin: 0;
+    border: 0;
+}
+
+QScrollBar::handle:vertical {
+    background-color: @border-strong;
+    border-radius: @radius-scrollbar;
+    min-height: @size-scrollbar-min;
+    margin: 0;
+}
+
+QScrollBar::handle:vertical:hover {
+    background-color: @text-secondary;
+}
+
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    width: 0;
+    height: 0;
+    border: 0;
+    background-color: transparent;
+}
+
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+    background-color: transparent;
+}
+
+QScrollBar:horizontal {
+    background-color: transparent;
+    height: @size-scrollbar;
+    margin: 0;
+    border: 0;
+}
+
+QScrollBar::handle:horizontal {
+    background-color: @border-strong;
+    border-radius: @radius-scrollbar;
+    min-width: @size-scrollbar-min;
+    margin: 0;
+}
+
+QScrollBar::handle:horizontal:hover {
+    background-color: @text-secondary;
+}
+
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+    width: 0;
+    height: 0;
+    border: 0;
+    background-color: transparent;
+}
+
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
+    background-color: transparent;
+}
+
+/* ---------- 浮层：tooltip 与菜单 ---------- */
+
+QToolTip {
+    background-color: @nav-bg;
+    color: @nav-text;
+    border: @border-width solid @nav-checked;
+    border-radius: @radius-button;
+    padding: @space-xs @space-sm;
+    font-size: @font-size-caption;
+}
+
+QMenu {
+    background-color: @surface;
+    color: @text-primary;
+    border: @border-width solid @border;
+    border-radius: @radius-button;
+    padding: @space-xs;
+    min-width: @size-menu-min-width;
+    font-size: @font-size-secondary;
+}
+
+QMenu::item {
+    background-color: transparent;
+    border-radius: @radius-input;
+    padding: @space-sm @space-xl @space-sm @space-md;
+}
+
+QMenu::item:selected {
+    background-color: @accent-soft;
+    color: @accent-pressed;
+}
+
+QMenu::item:disabled {
+    color: @text-disabled;
+}
+
+QMenu::separator {
+    height: @border-width;
+    background-color: @border;
+    margin: @space-xs @space-sm;
+}
+
+/* ---------- 文本角色 ---------- */
+
+QLabel[role="title"] {
+    color: @text-primary;
+    font-size: @font-size-title;
+    font-weight: @font-weight-bold;
+}
+
+QLabel[role="subtitle"] {
+    color: @text-primary;
+    font-size: @font-size-section;
+    font-weight: @font-weight-semibold;
+}
+
+QLabel[role="muted"] {
+    color: @text-secondary;
+    font-size: @font-size-secondary;
+}
+
+QLabel[role="error"] {
+    color: @error;
+    font-size: @font-size-secondary;
+}

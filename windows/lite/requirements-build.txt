@@ -1,0 +1,4 @@
+-r requirements.txt
+# T6 PDF 渲染（PDFium wheel）在运行依赖中固定；打包时显式重复声明便于审计随包二进制与许可。
+pypdfium2>=5.14,<6
+PyInstaller==6.22.3

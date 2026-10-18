@@ -1,17 +1,24 @@
 # Agent 项目入口
 
 本仓库当前主体为 Android 聊天助手；新增 Windows 产品方向的权威需求入口如下：
+- [Windows 完整版设计（2026-10-17）](docs/windows/WINDOWS_LITE_COMPLETION_DESIGN_2026-10-17.md)
+- [Windows 完整版分任务实施计划](docs/windows/WINDOWS_LITE_COMPLETION_PLAN_2026-10-17.md)
 - [Windows 微信详细方案](docs/windows/WINDOWS_WECHAT_PRODUCT_PLAN.md)
 - [Windows Agent 交接](docs/windows/AGENT_HANDOFF.md)
+- [Windows Lite 0.2 本机验证](docs/windows/WINDOWS_LITE_VERIFICATION_2026-10-17.md)
+- [读取/分析双后端验收清单（2026-10-18）](docs/windows/WINDOWS_LITE_ACCEPTANCE_CHECKLIST_2026-10-18.md)
+- [读取/分析双后端整改报告（2026-10-18，本机 `_reports/`）](_reports/backend_read_analysis_split_report.md)
 - [微信嵌入实机结果](docs/windows/WECHAT_EMBED_TEST_RESULTS_2026-10-14.md)
 - [临时探针源码](windows/probes/wechat-embed/README.md)
 - [Windows 工程入口](windows/README.md)
 - [crush 源码参考与模块接入](windows/reference/crush-monitor/README.md)
 
-任何涉及 Windows、微信嵌入、多开、实时回复、ExportWeChat HTML、客户画像、关系趋势、聊天统计、exe 安装包的任务，应先阅读上述两份文档。
+任何涉及 Windows、微信嵌入、多开、实时回复、ExportWeChat HTML、客户画像、关系趋势、聊天统计、exe 安装包、读取/分析后端选择的任务，应先阅读完整版设计、分任务实施计划、0.2 本机验证与 2026-10-18 验收清单。设计中的待实施能力不得写成已交付。
+
+2026-10-18 状态：T0a/T0b（点1/点4）与 T1–T11 代码/构建完成并分阶段提交；T12 自动项已通过（0.4.1 安装版：3×644 回归、单实例、版本无泄露、自检 fail-closed、隔离安装生命周期），真实微信场景与干净 VM 待人工；T9/T10 UI 集成完成；D-UI 已完成（当前候选 0.5.7，哑光纸+青瓷设计系统）。T12 自动可做项已全部通过；真实模型回合需要用户重填 API Key/恢复额度，人工场景需要用户在场，详见 T12 人工交接文档。真实进度以 [WINDOWS_LITE_IMPLEMENTATION_PROGRESS.md](docs/windows/WINDOWS_LITE_IMPLEMENTATION_PROGRESS.md) 为准。
 
 ## 工作边界
-- 正式 Windows 产品未实现；临时探针已完成部分验证并发现单击/滚动故障。不得把父级关系或模拟自检成功写成完整兼容。
+- `windows/lite/` 已有 Windows 0.2 本地实现和测试安装包；旧临时 `SetParent` 探针发现单击/滚动故障。新版顶层窗口停靠已验证鼠标命中、画面和 OCR，但单击/滚动、输入法、扫码及弹窗尚未逐项验收，不得写成完整兼容。
 - Windows 工程建议独立放在 windows/，保留 Android app/。
 - Windows 新基础为本地增强版 crush 源码参考包，保留 MIT 与逐文件来源。
   reference/ 中的源码未接入正式产品，不能把本地新增模块称为上游已有能力。
@@ -25,4 +32,54 @@
 - 不提交真实聊天、附件、密钥和个人资料；测试使用合成或脱敏数据。
 - 报告事实、推断和数据缺口分开，保留原始消息证据与实际覆盖范围。
 - 开始代码修改前确认所需子目录规则；交付说明真实验证和未测项。
+- 当前未完成/待用户验收项唯一清单：[docs/windows/WINDOWS_LITE_UNFINISHED_2026-10-18.md](docs/windows/WINDOWS_LITE_UNFINISHED_2026-10-18.md)
+## 任务看板协作（Codex / 其他 agent）
 
+- 本地看板：http://127.0.0.1:8790/ （本机 127.0.0.1，2 秒自动刷新；顶部「来源分工」区分 DeepSeek 与 Codex，默认两边都可见）。
+- 读写入口：`G:\codex\team-board\board.py`（Python venv：`G:\codex\wechat-lite-venv\Scripts\python.exe`）。
+- Codex 的每次写入必须带 `--source codex`（或设置环境变量 `TEAM_BOARD_SOURCE=codex`），否则任务会落到 DeepSeek 一侧。
+- 标准流程：`show --source codex --status pending` 看待认领 → `claim --task <id> --owner codex --source codex` 认领 → 每完成一步 `progress --task <id> --text "..." --status in_progress --percent <n> --source codex` → 完成时 `progress --task <id> --text "完成：..." --status completed --percent 100 --source codex`（`progress` 自 2026-10-18 支持 `--source` 校验任务归属；也可用环境变量 `TEAM_BOARD_SOURCE=codex`）。
+- 详细命令、HTTP 接口、提示词模板与冒烟验收见：`G:\codex\team-board\CODEX_BOARD_GUIDE.md`。
+- 约定：不要手工编辑 `board.json`；只读 `source=deepseek` 的任务，不要改动或重排；不能访问 127.0.0.1 时先报告网络/沙箱限制。
+
+## Codex 分派任务（2026-10-18，待认领）
+
+DeepSeek Lead 已将卡点任务分派到看板 **source=codex**，Codex 请先读
+[docs/windows/CODEX_ASSIGNED_TASKS_2026-10-18.md](docs/windows/CODEX_ASSIGNED_TASKS_2026-10-18.md)
+并在看板认领：
+
+| 任务 | 内容 |
+| --- | --- |
+| C1 | 修复 App 内自动查找微信对话按钮路径（UI 触发 search_not_found/result_not_found，代码级已 ok=true） |
+| C2 | T12-01 0.4.x→0.5.7 真实升级/卸载/数据保留 + 干净环境回归 |
+| C3 | T12-03 真实窗口停靠/弹窗/最小化/托盘恢复验收自动化 |
+| C4 | 自动找对话 OCR 名字误识改进（郜亚禹类，保持 fail-closed） |
+| C5 | T9/T10 替代验收：本地合成模型服务 + 双源仿真 |
+
+认领命令：
+`& G:\codex\wechat-lite-venv\Scripts\python.exe G:\codex\team-board\board.py claim --task C1 --owner codex --source codex`
+（C2–C5 同理；只写 `source=codex`，不要改动 `source=deepseek` 的任务。）
+### Codex 额度空窗期接管（2026-10-18）
+
+Codex 5 小时额度在 14:51 重置；DeepSeek 侧已启动多智能体临时接管 C1–C5，计划与运行名单见
+[docs/windows/CODEX_TAKEOVER_2026-10-18.md](docs/windows/CODEX_TAKEOVER_2026-10-18.md)。
+Codex 14:51 恢复后请先读该 MD 与看板 `TAKE-C*` 完成情况，只做复核/补漏，避免重复实现。
+### 互审对话（DeepSeek ↔ Codex，2026-10-18）
+- 窗口：http://127.0.0.1:8790/chat （看板右上角「互审对话 ↗」可新窗口打开；2 秒自动刷新）。DeepSeek 与 Codex 在此对话、互相纠正、给结论。
+- Codex 侧命令：
+  `& G:\codex\wechat-lite-venv\Scripts\python.exe G:\codex\team-board\board.py chat show --after <last_id>`
+  `& G:\codex\wechat-lite-venv\Scripts\python.exe G:\codex\team-board\board.py chat send --from codex --kind correction|question|answer|verdict --task <id> --reply-to <id> --text "..."`
+- 规则：每条意见带任务 ID；纠正写「现象→依据→建议」；被纠正方用 answer/verdict 回应；不直接改 source=deepseek 的任务。
+- 每轮开始先看 chat 新消息；结束前把结论写回 chat 与对应任务的 progress。完整说明见 CODEX_BOARD_GUIDE.md 第 10 节。
+
+### 自动互审（2026-10-18）
+- Codex 侧后台桥接进程已运行：`G:\codex\team-board\codex_chat_bridge.ps1` 每 20 秒检查互审窗口，最新消息来自 deepseek/user 时调用本机 `codex.exe exec` 自动回复（最小间隔 35s、每小时最多 24 条）。日志/状态/PID 同在 team-board 目录。
+- DeepSeek 侧每 5 分钟自动检查并回复；人工随时可插话，自动循环会接着聊。
+- 如不希望自动回复，停止桥接：`Stop-Process -Id (Get-Content G:\codex\team-board\codex-chat-bridge.pid)`，并让用户移除 DeepSeek 定时提醒。
+
+### 对话驱动的自动任务执行（2026-10-18）
+- 在互审对话窗口把消息类型设为「任务」（或 `board.py chat send --from user --kind task --text "任务：..."`），后台执行器 `G:\codex\team-board\codex_task_executor.ps1` 会自动在本仓库真正执行：读 AGENTS/文档 →（带 C*/S* 时先 claim/progress）→ 实施与验证 → 回写对话并更新看板。
+- 只执行 `kind=task`；普通聊天/纠正不触发执行。每小时最多 6 个任务，单任务超时 20 分钟。
+- 约束：不 commit/push、不发微信、不改 source=deepseek 的任务、不读取密钥；任务里写清范围/验收/禁止项。
+- 日志/状态/PID：`G:\codex\team-board\codex-task-executor.log|state.json|pid`；停止：`Stop-Process -Id (Get-Content G:\codex\team-board\codex-task-executor.pid)`。
+- 与聊天自动循环分开：聊天由 `codex_chat_bridge.ps1`（只聊），执行由本执行器（真干活）；执行结果会以 Codex 回应写回对话。

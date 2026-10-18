@@ -1,0 +1,271 @@
+# Windows Lite 集中实机验收矩阵（T12）
+
+状态：**准备中，尚未执行。** 本文件用于 T12 最终验收；在包 SHA 与所有自动/人工项完成前，任何一行都不得标记“通过”。
+创建：2026-10-18。计划来源：[实施计划](WINDOWS_LITE_COMPLETION_PLAN_2026-10-17.md) T12；设计要求见 [完整版设计](WINDOWS_LITE_COMPLETION_DESIGN_2026-10-17.md)。
+
+## 0. 候选包与执行规则
+
+- 候选安装包：待 T2–T11 合并后重新构建；构建时记录 `build_info.json` 的 `source_digest`、git commit、安装器 SHA-256。
+- 当前已安装版本 `0.3.1`（安装器 SHA-256 `6A35A86AD8BD4C1F48C877566BB8F578ABFCDE58DA7282766F1DF2FD7DA0F987`）只用于功能自测，**不是 T12 候选包**。
+- 每个场景记录：执行时间、包 SHA、Windows/微信版本、缩放比例、执行人、结果（通过/失败/未运行）、证据（截图路径/日志摘要，不保存真实聊天正文）。
+- 只有“有执行权限且真实运行”的项才能写通过；无环境/无样本的项写“未运行”并注明原因。
+- 用户只需完成系统无法代办的本人扫码/授权与输入法主观确认；其余由自动化与开发验证记录。
+
+## 1. 环境记录（执行时填写）
+
+| 项 | 值 |
+| --- | --- |
+| Windows 版本/构建 | 待填（参考 26200.9457） |
+| 微信版本与安装路径 | 待填（参考 4.1.15.53 / `C:\Program Files\Tencent\Weixin\Weixin.exe`） |
+| 屏幕分辨率与缩放 | 待填（100% / 125% / 150%） |
+| Python / PyInstaller（构建） | 待填（当前 venv 3.12.14 / 6.22.3） |
+| 候选包 SHA-256 | 待填 |
+| 账号类型 | 待填（ChatGPT 套餐 / 兼容 API / 本地模型 / Codex） |
+
+## 2. 自动化前置证据（T12 前必须全绿）
+
+| 检查 | 命令/文件 | 状态 |
+| --- | --- | --- |
+| 全套单元/回环测试 | `python -m unittest discover -s tests -q`（venv） | 未运行（等待 T2–T6 合并） |
+| 构建清单一致 | `tools/verify_build_info.py --info dist-release/ChatAssistantLite/build_info.json --source-root .` | 未运行 |
+| 打包与便携冒烟 | `build.ps1`（含 packaged `--smoke`） | 未运行 |
+| 隔离安装/自检/卸载 | `tools/verify_install.ps1 -Setup dist-release/ChatAssistantLite-Setup.exe` | 未运行 |
+| 真实 Codex 免费 RPC | 设置页「检测 Codex 账号与模型」/ `_reports` 记录 | 0.3.1 已验（账号 plus、7 模型 text,image）；最终包需复验 |
+| 日志/包内无密钥与正文 | 代码审查 + 安装包扫描 | 未运行 |
+
+## 3. 真实微信场景矩阵（11 项）
+
+| # | 场景 | 通过标准 | 状态 | 证据/执行人 |
+| --- | --- | --- | --- | --- |
+| 1 | 已登录微信后启动助手 | 自动找到正确窗口并停靠；退出后恢复原位置 | 未运行 | |
+| 2 | 测试账号扫码 | 登录窗到主窗衔接；不退出用户现有账号 | 未运行（需用户扫码） | |
+| 3 | 单击 / 滚轮 | 单击更换会话正常、滚动顺畅；旧建议立即停用 | 未运行 | |
+| 4 | 中文输入法 | 候选窗位置正确、组合输入不丢失、绝不触发发送 | 未运行（需用户主观确认） | |
+| 5 | 图片 / 文件 / 右键弹窗 | 原生可操作，不被助手遮挡或当作聊天分析 | 未运行 | |
+| 6 | 缩放 / 跨屏（100/125/150%） | 聊天完整、右栏不压缩中央、跨 DPI 坐标正常 | 未运行 | |
+| 7 | 最小化 / 还原 / 退出 | 行为符合设计；恢复后重新确认新帧；异常退出可恢复窗口 | 未运行 | |
+| 8 | 自动建议 | 新文字自动产生建议；读取/分析后端与版本正确；无需手动分析 | 未运行 | |
+| 9 | 历史联动 | 引用导入资料中的早期证据并可定位；未绑定联系人不引用 | 未运行 | |
+| 10 | 两账号 | 交错聊天不串记录/建议/授权；不存在自动发送 | 未运行 | |
+| 11 | 授权与安装 | 安装版登录/重启/续期/退出正常；升级/卸载与数据保留通过 | 未运行 | |
+
+## 4. 历史与模型专项（T5–T9 完成后补充）
+
+| 检查 | 通过标准 | 状态 |
+| --- | --- | --- |
+| 0.2 历史库迁移 | 原文数量/顺序/摘要一致；失败回滚；DPAPI 密文保留 | T5 自动化已验；最终包待复验 |
+| 全量历史分析 | 覆盖率/证据引用/断点续跑正确；不把片段数当消息数 | 未运行（T7） |
+| 档案/趋势/统计/任务界面 | 无可靠时间时显示不可计算；证据可跳转；任务状态一致 | 未运行（T8） |
+| 记忆检索与实时建议 | 同名联系人不串；早期事实可命中；建议带引用 | 未运行（T9） |
+| 多来源（最多 3 微信） | 两个真实窗口 30 分钟不串线、不互相停采 | 未运行（T10） |
+
+## 5. 发布前检查清单
+
+- [ ] 候选包 SHA-256 与验收记录一致，`build_info.json` 的 `source_digest` 与工作树一致（dirty=false 或已标注）。
+- [ ] 全套自动化、`self-test`、`verify_install.ps1`、真实 Codex RPC 复验通过。
+- [ ] 11 项真实微信场景与历史/模型专项全部有结论；无“未运行却写通过”。
+- [ ] 仓库无密钥/令牌/真实聊天；`_reports` 与 `test-output` 未进入安装包。
+- [ ] README、AGENTS、AGENT_HANDOFF、设计、计划、PROGRESS 与本矩阵一致。
+- [ ] 安装包、便携包、校验清单、发布说明齐备；提交/发布需用户明确授权。
+
+### 候选包 0.4.1（2026-10-18）
+
+- 版本：0.4.1
+- 安装包：`windows/lite/dist-release/ChatAssistantLite-Setup.exe`
+- SHA-256：`F8EC437C5E467DDCEC6EA789CC9F1818A7F4C86E42ED89CD2DA604D69D2DC69E`
+- Git：`1ac27d7`（feat/windows-lite，构建时 clean）
+- 已自动验证：`--version-json`（0.4.1 + source digest）、隔离 `--self-test` exit 0、`--smoke` ×3 exit 0、`tools/verify_install.ps1` 隔离安装/自检/卸载/保留数据 `ok=true`
+- 真实微信场景：按本矩阵逐项运行后填写；未运行不写“通过”。
+### 0.4.1 UI 自动探测证据（2026-10-18，无截图）
+
+- 安装版主窗口标题：`微信实时助手 · 便捷版 0.4.1`（UIA WindowControl 可见）
+- 微信关闭到托盘时，应用状态文本为“微信在运行但窗口不可见；点击‘启动微信’恢复窗口，或从系统托盘打开微信。”——**未重复启动微信**；随后把微信恢复为可见后窗口状态变为 visible（应用下一轮扫描可取到）
+- 设置页/自动查找等按钮存在于 UIA 树；通过跨进程 UIA 触发 Qt 导航按钮不可靠（Toggle 不触发页面切换），因此真实点击项保留人工验收
+- 其余真实场景仍按本矩阵逐项人工运行；未运行不写“通过”
+### 自动回归与真实模型前置条件（2026-10-18）
+
+- 全量回归 3 轮：`python -m unittest discover -s tests -t . -q` → 每轮 **Ran 644, exit 0**（teardown-safe 命令）
+- 真实模型验收前置条件当前不满足，需用户处理：
+  1) 本机真实 profile 的兼容 API Key 被早期测试/探针覆盖成测试占位值（长度 9 的 `test-key`），`analysis.list_models`/真实分析返回授权失败；已加入占位 Key 警告，需在 App 设置中重新填写真实 Key 并保存。
+  2) ChatGPT 套餐真实回合返回额度/不可用错误（InferenceQuotaError），需恢复额度后重试。
+- 因此 T9/T12 的真实模型回合（合成历史 + 合成对话）暂未执行，不写“通过”；代码层单测与本地检索证据已覆盖。
+### 0.4.1 安装版复核（2026-10-18，自动）
+
+- 单实例：已有实例运行时再次启动，第二进程 **exit 0、约 1.1s 退出**，进程数不变（主进程+恢复守护），未打开第二个窗口
+- `--version-json`：0.4.1、clean、119 个源文件；输出不含 `C:\Users` 等个人路径
+- `--self-test --data-dir <真实 profile>`：**fail-closed**，`ok=false / isolated=false`，退出码 **1**，真实 profile 文件列表与修改时间无变化（拒绝在正式目录执行自检）
+- 隔离 `--self-test`、portable/installed `--smoke`×3、`tools/verify_install.ps1`（install/self-test/uninstall/保留数据）此前已通过
+- 真实微信场景仍待人工逐项执行
+### OCR 自动找对话（真实窗口，2026-10-18）
+
+- 场景：安装版 0.4.1 已通过 UI 连接微信（状态“正在本地识别 · 中央实时画面”，镜像预览，停靠开关为关；OCR 文字区长度约 390 字符）。
+- 旧固定比例方案在真实窗口上失败（`title_mismatch`），改为 OCR 定位搜索框/结果行 + 严格标题校验 + 前台锁兼容激活后：应用处于前台时自动查找“田子夜” **ok=true**（activate→capture→find_search→paste_title→click_result→verify，约 11s）。
+- 全程未发送消息；失败路径会按 ESC 关闭搜索并 fail-closed。
+- 0.4.1 安装包尚未包含该修复，需下一次打包验证 UI 内的同一流程。
+### 候选包 0.4.3（2026-10-18，OCR 自动找对话 / 前台激活修复）
+
+- 版本 0.4.3，安装包 SHA-256：`1F0E7AE47F9FC84E2BD6045AC802E8E3744ED1A661510AA3455416055B17550B`
+- Git `5cafa1a`（clean）；`--version-json` 0.4.3，125 个源文件；隔离 `--self-test` exit 0；`package.ps1 -VerifyInstall` install/self-test/uninstall/保留数据 `ok=true`；`--smoke` exit 0
+- 已覆盖安装到 `E:\ChatAssistantLite`（0.4.3 窗口标题确认）
+- 代码级真实验收：应用前台时 OCR 自动找对话“田子夜” `ok=true`（约 11s，未发送消息）
+- 应用内一键自动找对话的跨进程点击验证受 UIA/连接时序影响仍不稳定，保留人工点击验收（0.4.1 已验证应用内可连接微信并显示镜像预览）
+### OCR 标题误识限制（自动找对话，2026-10-18）
+
+- 真实窗口实测：自动找“田子夜”通过（严格标题校验）。
+- “郜亚禹”在当前 OCR 下头部常被识别成“部亚禹/鄢子夜”一类单字差异；自动找对话会**fail-closed**（ESC 关闭、不发送、不切换），不会冒险切到错误会话。已加入结果行重试与头部 2x 放大校验，仍无法稳定区分时保持失败。
+- 结论：自动找对话对 OCR 可读的名字可用；不可读/易混名字需人工操作或后续 UIA/名称索引方案（见 OCR 依赖分析文档）。
+### 镜像预览缩放实证（0.4.3，自动）
+
+- 应用窗口宽度 +140px 后：应用窗口已改变，**原生微信窗口矩形完全不变**（`[243,141,1482,934]` → 同值），确认镜像预览默认模式不会移动/缩放原生微信。
+- 停靠开关默认关闭（0.4.1 同项实测 ToggleState=0）。
+- 应用内连接微信与 OCR 识别（当前识别文字非空，实测 390 字符）此前已在 0.4.1/0.4.3 验证；UIA 跨进程连接按钮偶发因窗口刷新时序失败，真实用户点击不受影响，保留人工复验。
+### 候选包 0.5.2（D-UI 最终候选，2026-10-18）
+
+- 版本 0.5.2；安装包 SHA-256 `34740332974CDCEB840E8588F46E28C333B39BE3081560D40F531E83F48042C2`
+- Git `3dea3b1`（clean）、126 个源文件；`--version-json` 0.5.2；隔离 `--self-test` exit 0；`--smoke` exit 0；`package.ps1 -VerifyInstall` install/self-test/uninstall/保留数据 `ok=true`；已覆盖安装到 `E:\ChatAssistantLite`
+- D-UI：哑光纸 + 青瓷设计系统；窗口 1000×520 / 最小 900×500，小屏（1536×864@150%）下内容完整显示；状态行（连接/后端/模型/分析）可见；AI 建议拨片、只读提示、占位 Key 警告可见
+- 全量测试 660 项 exit 0（含 3 项设计系统测试）
+- 真实微信场景（连接、托盘、自动查找、发送、弹窗/双窗口）仍按 T12 人工逐项验收；本候选包不含未提交改动
+### 候选包 0.5.3（D-UI 最终候选，2026-10-18）
+
+- 版本 0.5.3；安装包 SHA-256 `00946EDF830E1A1D9A936A01E01592DE1D60A83205465F7400FD943CA3EDA549`
+- Git `6d40c4a`（clean）、126 个源文件；`--version-json` 0.5.3；隔离 `--self-test` exit 0；`--smoke` exit 0；`package.ps1 -VerifyInstall` install/self-test/uninstall/保留数据 `ok=true`；已覆盖安装到 `E:\ChatAssistantLite`
+- D-UI：状态行单行可见（连接状态 / 后端+模型 / 分析状态）；1000×520 窗口 / 900×500 最小，小屏不裁切；截图见 `windows/lite/test-output/final-chat.png`
+- 全量 660 项测试 exit 0
+- 人工 T12 清单见 `docs/windows/T12_MANUAL_ACCEPTANCE_HANDOFF_2026-10-18.md`
+### 候选包 0.5.4（托盘保留修复，2026-10-18）
+
+- 版本 0.5.4；安装包 SHA-256 `5F5DE851805B8E25894DDB14D615BCF98F0374799AD49457153F9E009AAE8832`
+- Git `96e39a2`（clean）、127 个源文件；`--version-json` 0.5.4；隔离 `--self-test` exit 0；`--smoke` exit 0；`package.ps1 -VerifyInstall` install/self-test/uninstall/保留数据 `ok=true`
+- 修复：微信关闭到托盘后，扫描不再断开采集；同一 hwnd 存在隐藏窗口时保留连接并提示“微信已隐藏到托盘，仍在后台读取”。真实自动连接后隐藏窗口：状态文案出现（“仍在后台读取”/“暂时无法读取画面”），恢复后微信重新可见；自动连接设置已还原。
+- 自动检查中未稳定取到识别文字长度（UIA 读 QPlainTextEdit 内容不稳定），托盘隐藏时的实际 OCR 文字需人工看界面确认；worker 隐藏捕获路径有单测覆盖。
+- 全量 662 项测试 exit 0
+### 托盘隐藏读取真实通过（0.5.4 安装版，2026-10-18）
+
+- 自动连接一个正常会话后：`识别到的聊天文字` 非空（11 字符），随后用 `ShowWindow(SW_HIDE)` 模拟关闭到托盘
+- 隐藏期间：采集连接保持，识别文字仍为 11 字符（未清空、未断连），微信窗口保持隐藏
+- 恢复：`discovery.restore_window` 后微信重新可见、识别文字保持；测试临时开启的 `auto_connect` 已还原为 false
+- 结论：S-V04 托盘隐藏读取通过（自动检查，未保存聊天内容）；真实点击关闭到托盘的行为一致
+### 候选包 0.5.5（点4 模型记忆修复，2026-10-18）
+
+- 版本 0.5.5；安装包 SHA-256 `1D84EFDA2B70799E3BEEB2ECC5F5913A92B4BE820E02A81C3FCB24801C517B6C`
+- Git `ac23099`（clean）、128 个源文件；`--version-json` 0.5.5；隔离 `--self-test` exit 0；`--smoke` exit 0；`package.ps1 -VerifyInstall` ok=true；已覆盖安装到 `E:\ChatAssistantLite`
+- 点4 真实验证：连续两次关闭/重开 App，设置页均显示“已连接 ChatGPT：ch…@163.com”，账号记录与授权保留，不触发浏览器授权；`chatgpt_model` 选择现在在点选时立即持久化（`settings.remember_model`，不触碰凭据），重开 App 保留
+- 全量 665 项测试 exit 0
+### UI 内自动找对话自动探测（0.5.5，2026-10-18）
+
+- 自动连接后通过应用自己的设置页按钮（UIA InvokePattern）触发自动查找：
+  - “田子夜”：应用内返回“搜索结果里没有找到该联系人”，未切换、未发送；同一真实窗口用代码级 `find_conversation` 直接调用仍是 `ok=true`（约 11s）
+  - “文件传输助手”同样返回未找到
+- 判断：跨进程 UIA 触发时，搜索框/结果时序与真实人工点击不同（可能搜索覆盖层未刷新）；代码级真实验收已通过，但“应用内点击”路径仍需人工复验。
+- 结论：S-V10 保持未签收；人工点击是最终判据，不以该自动探测结果写通过。
+### 候选包 0.5.6（托盘捕获恢复加固，2026-10-18）
+
+- 版本 0.5.6；安装包 SHA-256 `8E950167A23D8D072659EDF437620A25BD22E31EA859DCAD88E71F83239B3928`
+- Git `14cce10`（clean）、129 个源文件；`--version-json` 0.5.6；隔离 `--self-test` exit 0；`--smoke` exit 0；`package.ps1 -VerifyInstall` ok=true；已覆盖安装到 `E:\ChatAssistantLite`
+- 发现并修复：托盘捕获后窗口可能停在离屏位置/仍可见；现在用 `SWP_HIDEWINDOW` 原子恢复几何+隐藏，若仍可见再隐藏；新增“隐藏窗口几何/可见性恢复”测试
+- 自动找对话：代码级真实查找“田子夜” `ok=true`；通过 UI 按钮跨进程触发仍偶发 `result_not_found/search_not_found`（应用内自动连接、读数本次成功：编辑区 106 字符），已加大搜索重试与 4 帧结果等待，仍需人工点击复验；不写通过
+- 全量 666 项测试 exit 0
+### 候选包 0.5.7（动作期间暂停采集，2026-10-18）
+
+- 版本 0.5.7；安装包 SHA-256 `35C37FEC197C9B088FB79F36F831B9624093BD6D3427B898AFA679B57CE3E34E`
+- Git `32fc8f2`（clean）、130 个源文件；`--version-json` 0.5.7；隔离 `--self-test` exit 0；`--smoke` exit 0；`package.ps1 -VerifyInstall` ok=true
+- 真实复现：应用已连接时，第二个 WGC 会话（动作里的 OCR 采集）会被 UI 的持续采集抢帧，导致 `search_not_found/result_not_found`；改为动作前 `stop_capture()`、动作结束后 `wechat_action_done` 自动重连
+- 修复后 UI 跨进程触发仍然得到 `没有找到微信搜索框`；代码级直接查找在相同窗口 `ok=true`。说明还有跨进程/前台时序因素，UI 点击路径保留人工验收，不写通过
+- 全量 668 项测试 exit 0
+### 候选包 0.5.9（Codex 接管后 clean build，2026-10-18）
+
+- 版本 0.5.9；安装包 SHA-256 `119FCC834E2D280CA3093EB804AB2835A786E65D720F85D893A86A52240BE1B6`
+- Git `13c7ff3`（clean）、147 个源文件；`--version-json` 0.5.9；隔离 `--self-test` exit 0；`--smoke` exit 0；`package.ps1 -VerifyInstall` ok=true；已覆盖安装到 `E:\ChatAssistantLite`；桌面/开始菜单快捷方式由安装器重建
+- 包含 DeepSeek 临时接管的 C1（安全 UI find 路径/H3/H4/P2-10）、C2（隔离升级验证工具）、C3（真实窗口验收工具）、C4（屏幕抓取+exact+foreground 守卫）、C5（合成验收）以及 Codex 0.5.8 基线
+- 全量：**750 tests OK / 37 skipped / exit 0**（提交前）；完整 clean-VM/真实模型/A4 发送/双微信仍待用户/Codex
+### 候选包 0.5.12（悬浮窗 + 布局/托盘修复，2026-10-18）
+
+- 版本 0.5.12；安装包 SHA-256 `4C63636F1130AB128CE5DA15010C39BADCBA106125EB35A2285B8C35E724A7BB`
+- Git `a571d17`（clean，149 源文件）；version-json/自检/smoke/隔离安装全通过；已覆盖安装到 `E:\ChatAssistantLite`
+- **悬浮窗模式**：主界面“悬浮窗”按钮 → 置顶无边框小窗（状态/会话名/分析状态/“分析当前对话”/“主界面”），主窗隐藏后采集与分析继续；完整功能仍在主界面
+- **布局**：预览默认“适应区域”并居中，100%/150%/200% 也居中；AI 建议面板切换不再扩大窗口，最大化时仍在窗内显示
+- **托盘隐藏读取**：修复 tray_capture 64 位 GDI 类型声明与 cloaked/offscreen 判定；minimized 隐藏抓帧实测返回 438×451，不再误报“暂时无法读取画面”
+- **模型**：真实 profile 的 `DeepSeek-V4.1-Flash`（显示名，HTTP 400）规范为可调用 id `deepseek-flash`；合成文本真实回合返回 3 条建议
+- 全量 **753 tests OK / 37 skipped / exit 0**
+- 14:51 后 Codex 任务：C6 悬浮窗真实化/不确定行为、C7 托盘隐藏读取可靠性、C8 布局与旧模型显示名迁移验证
+### 候选包 0.5.13（悬浮球主界面，2026-10-18）
+
+- 版本 0.5.13；安装包 SHA-256 `FD749F54273D6A1E58BFDBDCBE4CEB1A624EA5818B87D4B678711791F1373939`
+- Git `2103088`（clean）；`--version-json`/隔离 `--self-test`/`--smoke`/`package.ps1 -VerifyInstall` 通过；已覆盖安装到 `E:\ChatAssistantLite`
+- **悬浮球为主动作面**：圆形置顶可拖动；点开显示会话/状态/分析状态 + 3 条 AI 建议（复制/发送）+ “分析当前对话”；设置/退出在球内
+- **主界面只保留设置/历史**：球模式下隐藏聊天页与右侧 AI 面板；主窗关闭回到球，球“退出”才结束进程；球模式持久化
+- 全量 **755 tests OK / 37 skipped / exit 0**
+- Codex 14:51 后任务调整为 C6 悬浮球真实化/不确定行为、C7 托盘隐藏读取可靠性、C8 布局/模型迁移验证
+### 候选包 0.5.15（好感度/固定联系人/专属档案，2026-10-18）
+
+- 版本 0.5.15；安装包 SHA-256 `AD7F3DDF9B72EC166709093B24FC0667DCF0E07B95FC9ABB81FBCA1EC92375DA`
+- Git `0d97d7e`（clean，154 源文件）；version-json/自检/smoke/隔离安装全通过；已覆盖安装到 `E:\ChatAssistantLite`
+- **好感度**：参考 crush-monitor 的 6 维本地启发式（主动延续15/回应投入20/关心体贴20/自我开放15/亲密表达20/实际行动10；边界封顶 25；confidence/status），悬浮球显示分数环、等级和维度；明确标注本地估算，不调用模型
+- **固定联系人**：悬浮球“固定”按钮；只有固定联系人自动分析，未固定需点“分析当前对话”；`favorite_contacts` 持久化
+- **专属档案**：`contact_profiles.dat` DPAPI 加密；从聊天记录生成专属风格时保存该联系人档案；悬浮球“档案”打开历史页；导入 HTML/PDF 后生成流程沿用
+- 悬浮球视觉优化：渐变圆环、好感度数字、固定心形；主界面仅设置/历史
+- 全量 **799 tests OK / 37 skipped / exit 0**
+- 14:51 Codex 任务：C9 好感度模型化校准、C10 HTML/PDF 全量档案/同名匹配、C11 悬浮球/固定联系人/专属档案 UX 复核（另有 C6-C8）
+- **注意**：截图验证时误用合成配置覆盖真实 settings，DeepSeek API Key 丢失；路径/模型/账号已恢复，需在设置重填 Key（详见未完成清单）
+### 候选包 0.5.19（模型逐句好感度/导入自动档案，2026-10-18）
+
+- 版本 0.5.19；合并 Codex 未提交的 0.5.18 历史/模型/窗口改动 + DeepSeek 模型好感度/档案模块
+- **模型逐句判断**：`model_affection.py` 按字符/条数分块，逐块请求模型对对方每句 emotion/intent + 6 维 affinity；聚合 0-100、边界封顶 25、confidence/status；失败重试后继续（partial/errors）、cancel/next_offset 断点续跑、progress；内存只留块摘要/判断/样本，不保留全文 → 直接解决 crush-monitor 大文件一次塞爆问题
+- **导入自动档案**：HTML/PDF 导入成功先本地生成基础档案（关系/话题/日期），再按配置自动启动模型逐句档案（关系/常聊话题/偏好/禁忌/回复风格/重要日期/一句话画像）；同名联系人手动选择“关联已有/新建独立/取消”
+- **悬浮球**：显示模型档案字段、模型分析进度/结果；新增“模型分析档案”按钮；固定联系人仅自动分析、其他需手动
+- 全量 **888 tests OK / 37 skipped / exit 0**
+- 需用户重填 DeepSeek API Key（此前配置覆盖事故）；真实模型回合尚未验证
+### 候选包 0.5.20（0.5.19 + 悬浮球点击修复，2026-10-18）
+
+- 版本 0.5.20；安装包 SHA-256 `5A5DE2A89A3291D2B56C0B1E98B7B96E933F7593E0206E7B7913BF6DAE8CCA4E`
+- Git `90e8f8d`（代码）；160 源文件；version-json/隔离 self-test/smoke/安装验证通过；已覆盖安装到 `E:\ChatAssistantLite`
+- 修复 BallFace 子控件吞点击：悬浮球可点击展开/收起；原生点击实测展开到 400×560
+- 全量 **889 tests OK / 37 skipped**；模型逐句分析/自动档案/同名确认已接入；真实模型待用户重填 Key
+### 候选包 0.5.21（用户 #41 UI 反馈 + C1/C13 修复，2026-10-18）
+
+- 版本 0.5.21；安装包 SHA-256 `35A293EAD946B0AA835FB3EAB8F22738AF453DF8DE755C8BB1EC1D92289AD6A5`
+- Git `a4dfc79`（clean，162 源文件）；version-json/self-test/smoke/安装验证通过；已覆盖安装
+- 合并 Codex C8-FIX（完整模型 ID）、C13（屏外微信窗口判 hidden + 显式恢复）、C1 find 完成信号竞态修复
+- 关联当前微信会话：按标题规范化查找/新建联系人，立即显示名字并打开“档案”tab，创建加密基础档案（无需先手动选档案）
+- 新桌面/exe/快捷方式图标（圆角聊天气泡+爱心）；左侧导航改为“对话/档案/设置”文字标签；悬浮球改为奶油内核+渐变进度环+固定心形
+- 全量 **909 tests OK / 42 skipped / exit 0**
+- 仍需：真实 UI C1 复验（避免动用户窗口）、C6/C7/C11/C12 复核、设置页进一步分区（C15）、真实模型 Key
+### 候选包 0.5.27（最小化拦截修复 + 悬浮球重做，2026-10-18）
+
+- 版本 0.5.27；安装包 SHA-256 `ED447CF19B944415616C474E6E219D32FB9950B016741809C524ACEA73E5B96C`
+- Git `879864a` + 未提交改动（dirty）；version-json/隔离 self-test 通过；已覆盖安装到 `E:\ChatAssistantLite`
+- **修复微信最小化被抢占**：采集 worker 检测到 `minimized` 时不再走 tray_capture 的“短暂显示再抓帧”，只发 unavailable 并等待用户还原；实测微信保持 minimized 5 次轮询不变，`restore_window(activate=True)`（启动微信按钮）仍可正常还原
+- **悬浮球重做**：透明窗口圆角面板（不再是黑边方块）、奶油内核+渐变好感环、六维圆点刻度、`设置 / − / ×` 三个明确按钮（不再用 ⋯ 菜单）、空状态与建议用 QStackedWidget 切换、Esc 收起、点击展开不被空白误收起、聚焦样式与 disabled 样式、动态高度按内容收拢
+- 面板字段去掉 `['...']` repr（列表渲染为顿号分隔）
+- 桌面旧 `ChatAssistantLite-Setup-0.5.21.exe` 已删除；exe/快捷方式/任务栏图标均为新图标（并设置 AppUserModelID）
+- 全量 **910 tests OK / 42 skipped**
+### 候选包 0.5.28（ExportWeChat 伴生 JSON 完整导入，2026-10-18）
+
+- 版本 0.5.28；安装包 SHA-256 `08A0400C25BB38EB07A287EB57758570E4FE4A3AAEC5D3F4CD3A13DADD474D12`
+- Git `a7d3256`；168 源文件；version-json/隔离 self-test 通过；已覆盖安装
+- **根因**：真实 ExportWeChat 导出把完整记录放在同目录 `<name>.html.json`，HTML 只是渲染壳（5 条占位 + “模板错误”）；旧解析只读 HTML 且跳过 script，仅得 13 条 UI 文本
+- **修复**：新增 `importers/exportwechat_json.py`（probe 命中伴生 JSON 签名 → `parser_name=exportwechat_json`、`support_level=exact`）；`exportwechat_html.probe` 先委托 JSON 探测；`SAMPLE_VERIFIED=True` 仅限 JSON 通道，HTML-only 仍走 generic fallback
+- **补齐旧残缺数据**：`import_jobs` 把 parser_name 写入来源身份；`history` 对“同 digest、不同 parser”的重复导入原地替换来源（同 source_id、版本递增、派生物失效），不新增重复来源
+- 真实样本端到端：**1684 条 / 16912 字**（原 13 条），sender/sent_at 完整，时间跨度 2026-08-31→2026-10-18，重导幂等；跳过图片 110 + 表情 60 并计数
+- 全量 **933 tests OK / 42 skipped**
+### 候选包 0.5.28 安装版端到端复验（2026-10-18）
+
+- 对象：已安装 `E:\ChatAssistantLite\ChatAssistantLite.exe`（0.5.28，PID 35512），非源码树运行
+- 操作路径：悬浮球 → `档案 ↗` → 主窗历史页 → `导入聊天记录` → 文件对话框输入真实路径 → 确认同名档案关联 → 导入完成
+- 界面结果：`完成：1684 个文字片段，约 16912 字。`；页脚 `已导入 1684 个文字片段；内容仅保存在本机。已自动生成联系人基础档案；可在档案页启动模型逐句分析。`
+- 数据库直查（`memory.sqlite3` 副本）：`sources` 仍仅 **1** 行，`source_id` 未变（`d9ad5a63…`）→ 旧的 13 条残片被**原地替换**，未产生重复来源
+- 字段变化：`parser_version 1 → exportwechat_json`、`record_count 13 → 1684`、`char_count 57 → 16912`、`import_version 1 → 2`、`failure_count 0`
+- 记录表：1684 行、`sum(char_count)=16912`、ordinal 0–1853 无空洞、`record_type` 全为 `message`；该联系人 `scope_state` 升到 source_set_version 2 / memory_version 2（派生物已失效待重建）
+- 导入后自动生成基础档案：关系定位 `普通联系人/待确认`、话题与重要日期（9月5日/12日/13日）已出，`model_analyzed=false`；模型逐句分析需用户重填 DeepSeek API Key
+- 结论：0.5.28 在安装版真实路径上修复确认；未发送任何消息、未保存真实聊天内容到仓库/文档/截图
+- 遗留小问题（不阻塞）：本地基础档案「常聊话题」把来源标签 `ExportWeChat HTML` 当成第 7 个话题，超出 `MAX_TOPIC_ITEMS=6`，应在话题切片前合并/裁剪
+### 候选包 0.5.29（基础档案话题上限修复，2026-10-18）
+
+- 版本 0.5.29；安装包 SHA-256 `14FC0ABC98BD45B1B9ACDDF5E5AA919266AACAB8357E81D4259DAE60112366B2`；exe SHA-256 `A95BC354E9A94739A9F0E196580B79EC457282BE070A745FF02ABE89BCBA51B8`
+- Git `52558f9`（dirty：仅版本号三处 + 文档）；168 源文件；`--version-json` = 0.5.29；隔离 `--self-test` exit 0；构建 smoke 通过
+- 修复：`auto_profile._topics_value` 的来源格式标签不再追加到 top-6 之后，而是先占名额（最多 6 个），关键词话题按命中次数补满剩余名额，总数恒 ≤ `MAX_TOPIC_ITEMS`
+- 真实数据复核（真实库副本 + 真实加密档案副本，未改用户数据）：`田子夜` 档案话题由 7 项降为 6 项 → `情感与关系 / 生活与家庭 / 健康与作息 / 预算与价格 / 库存与交期 / ExportWeChat HTML`；关系定位、重要日期、`model_analyzed=false` 不变
+- 已覆盖安装到 `E:\ChatAssistantLite`（注册表 `ChatAssistant Lite version 0.5.29`），启动后悬浮球正常
+- 全量 **934 tests OK / 42 skipped**
+- 仍需：C1 真实 UI、C3 真实弹窗/托盘、C6/C7/C9–C12/C14 复核、C15 设置页分区；真实模型分析需用户重填 DeepSeek API Key

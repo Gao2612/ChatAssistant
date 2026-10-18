@@ -1,1 +1,196 @@
 
+## Windows 产品方案与 Agent 入口
+
+Windows 微信内嵌、多账号、实时回复建议，以及 ExportWeChat HTML / 本地聊天记录的历史分析任务方案，见 [详细方案](docs/windows/WINDOWS_WECHAT_PRODUCT_PLAN.md)。其他智能体请先读 [AGENTS.md](AGENTS.md) 和 [交接说明](docs/windows/AGENT_HANDOFF.md)。
+
+Windows 方向已有独立实现 [`windows/lite/`](windows/lite/README.md)（ChatAssistant Lite）：官方微信原生窗口中央停靠 + 本地 OCR/多模态读取 + 右侧 AI 建议 + 悬浮球 + HTML/PDF 历史导入 + 多账号，并新增 DSH 传输层（`dsh_transport.py` / `dsh_models.py`）。**已装版本 0.5.30**，工作分支 `feat/windows-lite`。
+
+- **0.6.0 UI/UX 重设计进行中**：取消现有的「76px 导航轨 + 三页并列 + 右侧 AI 抽屉」，改为「左侧主导航 + 中央工作台 + 按需上下文面板」，四个一级区域为 工作台 / 会话档案 / 任务与记录 / 设置。设计真源：[UI 重设计规范](docs/windows/UI_REDESIGN_2026-10-19.md)。
+- **现状基线**：[ui-audit-2026-10-19/](docs/windows/ui-audit-2026-10-19/) 存有 13 张控件抓图与 13 张原生截图，迁移时逐屏对比。
+- **开发、测试与打包**：解释器、`pytest tests`、PyInstaller onedir + Inno Setup 6 的确切命令与产物目录，见 [windows/lite/README.md](windows/lite/README.md)。
+
+真实微信的单击/滚轮/输入法/扫码/弹窗与远程读取质量仍需逐项验收，详见 [验收清单](docs/windows/WINDOWS_LITE_ACCEPTANCE_CHECKLIST_2026-10-18.md) 和 [0.2 验证记录](docs/windows/WINDOWS_LITE_VERIFICATION_2026-10-17.md)。
+
+已补充 [微信嵌入测试结果](docs/windows/WECHAT_EMBED_TEST_RESULTS_2026-10-14.md) 和 [测试原型源码](windows/probes/wechat-embed/README.md)。旧 `SetParent` 探针存在单击/滚动异常，不代表新的顶层停靠方案通过了全部交互验收。
+
+**装在手机上的「对话副驾」：你在任何聊天 App 里聊天，它在旁边读懂对方、告诉你该怎么回，一键填进输入框，发不发由你。**
+
+已在 **微信、QQ、X（Twitter 私信）** 三个平台真机跑通，飞书采集已接入。一套内核，一个 App 一个几十行的适配器。
+
+**联系 / 反馈 / 合作：请公众号私信**（二维码见文末）。 官网：[chatjevs.com](https://chatjevs.com)
+
+<p align="center">
+  <img src="docs/images/overlay.png" width="300" alt="悬浮窗：聊天上方的 Jev 分析面板" />
+  &nbsp;&nbsp;&nbsp;
+  <img src="docs/images/settings.png" width="300" alt="设置页" />
+</p>
+<p align="center"><sub>左：悬浮窗——危险等级、对方真实意图、Jev 排好序的 3 条候选回复，复制或填入。右：设置页。</sub></p>
+
+## 亮点
+
+- **一套内核，多平台。** 微信 8.0.78、QQ 9.3.50、X 12.25 真机验证，读消息 → 判断 → 候选 → 填入整条链全通。新增一个 App 只需实现一个 `ChatAppAdapter`，其余全部复用。
+- **非侵入。** 不 hook、不改包、不走任何 App 的接口或账号、不读数据库，只用系统无障碍服务读「屏幕上正在显示的对话」。微信这种混淆节点的也能读到。
+- **看得懂，不止会写。** 用 [TypeSafe Jev](https://typesafe.ai/) 判断模型一次给出：对方真实意图、危险等级（1–9）、对方要什么、该不该马上回、最佳动作。约 1 秒，带把握度。
+- **3 条候选，Jev 排序。** 生成模型（默认 DeepSeek）起草 3 条口语化回复，Jev 按「最合适」排序并给出占比。
+- **发送永远由你点。** 程序只把回复填进输入框，从不自动发送，不碰转账 / 红包 / 收款。
+- **知识库 + 关联上下文。** 本地维护笔记和联系人档案（关系、别名、备注），分析时自动带上命中的知识和这个人的历史聊天，候选回复与知识库一致；联系人可跨 App 关联（同一个人在微信和 QQ 用别名对上）。历史记录默认关闭，开了也只存本机。
+- **读不到就 OCR。** 树里没有正文时自动截屏、用 ML Kit 中文离线识别（不上传图片、不需要 Google 服务），飞书正文靠它；任何 App 都可以在悬浮窗菜单里手动「截屏识别一次」。
+- **接口全可配。** 判断 / 回复 / 视觉三路接口的地址、密钥、模型分别可填，内置 OpenRouter、TypeSafe 直连、DeepSeek 官方、通义兼容预设，各自一键连通测试；只有一把密钥也能用（回复、视觉留空自动继承）。
+- **隐私在本机。** 密钥只存 App 私有空间，聊天内容只在分析那一刻发给模型接口，不落盘、不进日志。
+
+## 平台支持
+
+| 平台 | 状态 | 采集方式 | 备注 |
+|---|---|---|---|
+| 微信 Android | ✅ 全链路 | 伪装系统无障碍服务读气泡节点 | 8.0.52+ 混淆节点，伪装后 8.0.78 实测可读 |
+| QQ Android | ✅ 全链路 | 无障碍读节点 | 9.3.50 实测（群聊）；1v1 按同结构推断 |
+| X / Twitter 私信 | ✅ 全链路 | 解析 Compose 节点的 content-desc | 12.25 实测，中文界面；英文界面未验 |
+| 飞书 / Lark | ✅ OCR 兜底（真机验证） | 无障碍读气泡矩形 + ML Kit 离线 OCR 识别正文 | 正文自绘不在无障碍树里，1.3 起对每个气泡矩形做 OCR；我/对方按已读状态判 |
+| 任意其它 App | ✅ 手动 | 悬浮窗菜单「截屏识别一次」整屏 OCR | 不自动、不分我/对方（全部当作对方所说并在面板标注） |
+| 桌面端 / 网页 | ⏳ 规划 | 截图 + OCR / 视觉 | 同一内核，换采集方式 |
+
+本项目只读你自己设备上、你自己有权查看的聊天，不针对任何单一平台。
+
+## 快速开始
+
+**1. 装包。** 仓库里有签好名的 release 包：[`apk/jev-assistant-v1.3-release.apk`](apk/jev-assistant-v1.3-release.apk)（Android 11+）。更新日志见 [CHANGELOG.md](CHANGELOG.md)，各版本安装包在 [Releases](https://github.com/jev-chat/jev-chat-jarvis/releases)。
+
+```bash
+adb install -r apk/jev-assistant-v1.3-release.apk
+```
+
+**2. 填密钥。** 打开 App → 设置 →「接口」现在分三张卡：判断接口 / 回复接口 / 视觉接口。最简单只填「判断接口」一栏的 [OpenRouter](https://openrouter.ai/) API Key，其余两栏留空会自动继承这把密钥就能用。想换回复模型（默认 `deepseek/deepseek-chat-v3.1`，国内 Gemini / OpenAI 会被区域限制）就在「回复接口」选预设（OpenRouter / DeepSeek 官方 / 通义兼容）或自填地址，每张卡都有独立的一键连通测试。
+
+**3. 开权限。** 按主页向导开三项：
+- 无障碍（读消息；升级到 1.3 后需要把无障碍关掉再打开一次，截屏能力才生效）
+- 悬浮窗 / 显示在其他应用上层（展示分析）
+- 自启动 + 省电无限制（小米 / HyperOS 必做，否则后台被冻结读不到消息）
+
+装过 debug 包的要先卸载再装 release（签名不同），卸载会清掉密钥和设置。小米 / HyperOS 重装后悬浮窗权限会被重置，装完按向导再开一次。
+
+## 知识库与上下文
+
+**在哪**：设置 → 分析 →「知识库与联系人」。
+
+- **笔记**：标题 / 内容 / 标签 / 常驻（alwaysOn）。命中规则：常驻笔记每次都带；其它笔记要标签或标题出现在会话标题或最近 6 条消息里才带，最多 5 条。支持从多行文本粘贴导入，空行分段，每段首行当标题。
+- **联系人**：姓名 / 别名（每行一个）/ 关系 / 备注。会话标题匹配姓名或任一别名时生效（自动去掉群名尾部人数、首尾空白、大小写差异）。悬浮窗气泡长按「把当前会话存为联系人」可一键建档。
+- **历史**：开关「记录聊天历史（只存本机）」默认关闭；开启后每次分析会把最近 N 条（默认 30）历史一并交给模型，并去掉屏幕上已经显示过的部分。
+- **隐私**：知识库与历史全部存在 App 私有目录，设置里「清空知识库与历史」一键删除；不进日志、不进 git。
+- 悬浮窗面板会显示一行「知识库 N 条 · 历史 M 条」。
+
+## 它怎么工作
+
+```
+微信 / QQ / X / 飞书 ──(无障碍读节点)──▶ 采集最近消息
+                                  │
+              ┌───────────────────┴───────────────────┐
+              ▼                                        ▼
+   Jev 判断（一次 7 道题）                    生成模型起草 3 条候选
+   意图 / 危险 / 需求 / 动作 / 该不该回          │
+              └───────────────────┬───────────────────┘
+                                  ▼
+                        Jev 给 3 条候选排序
+                                  ▼
+                半透明悬浮窗展示 → 复制 / 填入（不发送）
+```
+
+- **采集**：一个 App 一个适配器，服务按前台包名分发。适配器只负责把当前窗口变成「标题 + 消息列表（谁说的、说了什么）」，下游全部通用；树里没有正文时走截屏 + 离线 OCR 兜底（限频、失败退避，不会每秒连拍）。
+- **判断**：[Jev](https://docs.typesafe.ai/) 只回答选择 / 打分 / 是非，一次请求发全部题目，约 1 秒返回；命中知识库时 state 里会带 `background`（关系 + 联系人备注 + 命中笔记）和 `history`（历史消息）。
+- **回复**：生成模型起草 3 条候选，Jev 排序；提示词要求回复必须与知识库一致，不编造知识库没有的事实。
+- **回填**：`ACTION_SET_TEXT`，失败则剪贴板 + `ACTION_PASTE`，不发送。
+
+## 适配一个新的聊天 App
+
+1. 在 `capture/ChatAppAdapter.kt` 实现 `ChatAppAdapter`：`pkg` 是包名，`extract(root, res)` 从无障碍树取出标题和消息列表（`Msg(side, text)`，`side` 为 `me` / `other`），不在聊天窗时返回 `null`。
+2. 在 `capture/ChatCaptureService.kt` 的 `adapters` 加一行。
+3. 判断、候选、悬浮窗、填入都不用动。
+
+先用 `adb shell uiautomator dump` 看目标 App 暴露了什么，已有四个适配器覆盖了四种情况：
+
+| App | 树的情况 | 适配器怎么做 |
+|---|---|---|
+| QQ | 节点开放，有 id | 正文 `id/mjn`、标题 `id/371`，按气泡贴哪侧头像判谁说的 |
+| 微信 | 对普通无障碍服务混淆节点 | 服务类名伪装成系统的 `SelectToSpeakService`，读 `id/bkl` 气泡，按左右判 |
+| X | Compose，无 id，text 为空 | 解析 content-desc `发件人：正文。时间。Read`，发件人是「你」即我方 |
+| 飞书 | 正文自绘，树里没有文字 | 树上拿 bubble_content_container 矩形与已读状态，OCR 每个矩形的正文 |
+
+适配器返回 `null` 表示不在聊天窗，返回空消息列表表示在聊天窗但树里没正文——只有后者会触发 OCR 兜底。
+
+QQ、X 全程只有一个 Activity，判「是不是聊天窗」要看树里有没有该有的节点（如输入框），不能看 Activity 名。
+
+## 构建
+
+JDK 17 + Android SDK（platform 35 / build-tools 35）。
+
+```bash
+./gradlew assembleDebug      # app/build/outputs/apk/debug/app-debug.apk
+./gradlew assembleRelease    # 需要仓库外的签名 properties，路径由 JEV_KEYSTORE_PROPS 指定
+```
+
+## 已知限制
+
+- **国产 ROM 后台冻结**：小米 / HyperOS 会杀后台进程，前台保活、自启动、省电无限制都配了仍可能被杀，气泡短暂消失，在聊天里再交互一下自愈。
+- **飞书正文靠 OCR**：飞书正文是自绘控件，无障碍树里只有气泡矩形，1.3 起对每个矩形做离线 OCR；我 / 对方按已读状态判断，判反时请用「存为联系人」并在备注里说明，或关掉自动分析改手动。
+- **X 只按中文界面验过**：分隔符 `：`、`上午 / 下午`、`Read` 是中文界面实测；英文界面只做了兜底，未验。
+- **群聊**：按一对一分析，「对方」与关系设定对群聊不准。
+- **中文**：Jev 主训练语言是英文，题目用英文、聊天内容保留中文；建议用自己的真实对话做一批标注校准（见 `tools/jev/`）。
+- 伪装无障碍服务是绕过微信混淆的手段，微信版本更新可能失效。
+- **知识库检索是标签/标题包含匹配**，不做语义检索，笔记请打好标签才能被命中。历史按「谁说 + 原文」去重，同一个人重复说同一句只记一次。
+- **OCR 依赖系统放行截屏**：无障碍服务要被系统允许截屏才能用，小米 / HyperOS 可能拒绝（面板会提示失败原因）；受保护窗口（`FLAG_SECURE`）截不到。
+- **OCR 只认屏幕上看得见的部分**：长消息被截断的部分读不到；识别有错字。
+- **包体变大**：ML Kit 中文离线模型让 APK 从约 12 MB 增至约 27 MB，且只打 arm64-v8a。
+
+## 目录
+
+- `app/` — Android 应用（Kotlin，传统 View）
+  - `capture/` 无障碍采集：`ChatAppAdapter.kt` 各 App 适配器、`ChatCaptureService.kt` 分发服务、前台保活、`ocr/` 截屏与离线识别
+  - `jev/` Jev 客户端与题目集 · `overlay/` 悬浮窗 · `core/` 配置与数据模型（含 `core/kb/` 知识库存储与上下文构建）
+  - `KnowledgeActivity` 知识库管理页（笔记 / 联系人）
+- `tools/jev/` — Jev 题目集与校准脚手架（Python）
+- `docs/` — 设计与验收文档
+- `apk/` — 签好名的 release 包
+
+## 交流群 / 需求收集
+
+**如需联系，请公众号私信。** 合作、反馈、进群失败、二维码过期，都走公众号私信，其它渠道不一定看得到。
+
+<p align="center"><img src="docs/images/wechat-mp.png" width="180" alt="公众号二维码" /></p>
+
+想听真实需求：你在哪个聊天 App 上最想要这个副驾？希望它判断什么、怎么提示、什么绝对不能碰？扫码进群直接说。**1、2、3、4 群已满，不要再扫；5、6、7 群任选一个，请勿重复加入。**
+
+<table align="center"><tr>
+  <td align="center"><img src="docs/images/wechat-group-5.png" width="160" alt="5 群" /><br/><b>5 群</b></td>
+  <td align="center"><img src="docs/images/wechat-group-6.png" width="160" alt="6 群" /><br/><b>6 群</b></td>
+  <td align="center"><img src="docs/images/wechat-group-7.png" width="160" alt="7 群" /><br/><b>7 群</b></td>
+</tr></table>
+
+<p align="center"><sub>以下四群已满，请勿再扫：</sub></p>
+
+<table align="center"><tr>
+  <td align="center"><img src="docs/images/wechat-group-1.png" width="100" alt="1 群（已满）" /><br/><sub>1 群 · 已满</sub></td>
+  <td align="center"><img src="docs/images/wechat-group-2.png" width="100" alt="2 群（已满）" /><br/><sub>2 群 · 已满</sub></td>
+  <td align="center"><img src="docs/images/wechat-group-3.png" width="100" alt="3 群（已满）" /><br/><sub>3 群 · 已满</sub></td>
+  <td align="center"><img src="docs/images/wechat-group-4.png" width="100" alt="4 群（已满）" /><br/><sub>4 群 · 已满</sub></td>
+</tr></table>
+
+<p align="center"><sub>群二维码 7 天有效（本批到 2026-09-29），过期了公众号私信要新码。</sub></p>
+
+## 姊妹项目
+
+这个项目和几个朋友的 AI 工具放在同一个组织 [jev-chat](https://github.com/jev-chat) 下面：
+
+- [Jev 聊天助手 macOS 版](https://github.com/jev-chat/jev-chat-mac)：微信消息意图识别悬浮窗，看屏 + 本地小模型判断意图和风险，再按话术生成回复候选，纯只读。
+- [Jev 聊天助手 Windows 版](https://github.com/jev-chat/jev-chat-windows)：微信 Windows 4.x 旁挂的回复辅助，窗口截图 + 本地离线 OCR，3 条候选一键填入，发送永远手动。
+- [微墨 WeChat Ink](https://github.com/Snowwit88/wechat-ink)：微信公众号写作、配图与排版助手，支持资料核验、学术风图文和草稿发布。
+## 免责声明与许可
+
+仅供个人学习与研究使用。只处理你自己设备上、你自己有权查看的聊天。请遵守微信、QQ、X、飞书等各软件的许可协议与当地法律法规，作者不对使用后果负责。代码以 [MIT](LICENSE) 协议开源。
+
+## Windows Lite 0.5.21 备份状态（2026-10-18）
+
+- 备份分支：`feat/windows-lite`（`c02ac4b` 应用备份，最新说明提交 `d577ca8`）；已推送 GitHub，仅作半成品备份，未验收项见下方报告。
+- 安装包：`windows/lite/dist-release/ChatAssistantLite-Setup.exe`（0.5.21，SHA256 `D15FDAAE8B344A3FA70740312CC846056761DE56B672459103E7108532F42C10`；本机隔离安装→自检→卸载通过）。
+- 功能报告：[docs/windows/FEATURE_REPORT_2026-10-18.md](docs/windows/FEATURE_REPORT_2026-10-18.md)（已完成/未验收/风险/实测步骤）。
+- 本轮交付摘要：看板/互审协作系统、C13 屏外窗口恢复、C8-FIX 完整 ID 与回归、C1 完成信号竞态修复（真实 UI `not_foreground` 未验收）、悬浮球/桌面图标资源。
+- 未验收/风险：C1 真实 UI 前台丢失、C7 托盘抓帧恢复竞争、C9/C10/C11/C12 模型/档案问题、C14/C15 视觉布局、C17 测试清理；全量 909 OK / 42 skipped。
+- 边界：本次备份推送到 `feat/windows-lite`，未推送 `main`，不包含密钥、真实聊天记录或本地配置；未验收项不得视为已修复。
