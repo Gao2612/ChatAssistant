@@ -33,7 +33,7 @@
 - 本地看板：http://127.0.0.1:8790/ （本机 127.0.0.1，2 秒自动刷新；顶部「来源分工」区分 DeepSeek 与 Codex，默认两边都可见）。
 - 读写入口：`G:\codex\team-board\board.py`（Python venv：`G:\codex\wechat-lite-venv\Scripts\python.exe`）。
 - Codex 的每次写入必须带 `--source codex`（或设置环境变量 `TEAM_BOARD_SOURCE=codex`），否则任务会落到 DeepSeek 一侧。
-- 标准流程：`show --source codex --status pending` 看待认领 → `claim --task <id> --owner codex --source codex` 认领 → 每完成一步 `progress --task <id> --text "..." --status in_progress --percent <n>` → 完成时 `progress --task <id> --text "完成：..." --status completed --percent 100`。
+- 标准流程：`show --source codex --status pending` 看待认领 → `claim --task <id> --owner codex --source codex` 认领 → 每完成一步 `progress --task <id> --text "..." --status in_progress --percent <n> --source codex` → 完成时 `progress --task <id> --text "完成：..." --status completed --percent 100 --source codex`（`progress` 自 2026-10-18 支持 `--source` 校验任务归属；也可用环境变量 `TEAM_BOARD_SOURCE=codex`）。
 - 详细命令、HTTP 接口、提示词模板与冒烟验收见：`G:\codex\team-board\CODEX_BOARD_GUIDE.md`。
 - 约定：不要手工编辑 `board.json`；只读 `source=deepseek` 的任务，不要改动或重排；不能访问 127.0.0.1 时先报告网络/沙箱限制。
 
@@ -66,3 +66,8 @@ Codex 14:51 恢复后请先读该 MD 与看板 `TAKE-C*` 完成情况，只做�
   `& G:\codex\wechat-lite-venv\Scripts\python.exe G:\codex\team-board\board.py chat send --from codex --kind correction|question|answer|verdict --task <id> --reply-to <id> --text "..."`
 - 规则：每条意见带任务 ID；纠正写「现象→依据→建议」；被纠正方用 answer/verdict 回应；不直接改 source=deepseek 的任务。
 - 每轮开始先看 chat 新消息；结束前把结论写回 chat 与对应任务的 progress。完整说明见 CODEX_BOARD_GUIDE.md 第 10 节。
+
+### 自动互审（2026-10-18）
+- Codex 侧后台桥接进程已运行：`G:\codex\team-board\codex_chat_bridge.ps1` 每 20 秒检查互审窗口，最新消息来自 deepseek/user 时调用本机 `codex.exe exec` 自动回复（最小间隔 35s、每小时最多 24 条）。日志/状态/PID 同在 team-board 目录。
+- DeepSeek 侧每 5 分钟自动检查并回复；人工随时可插话，自动循环会接着聊。
+- 如不希望自动回复，停止桥接：`Stop-Process -Id (Get-Content G:\codex\team-board\codex-chat-bridge.pid)`，并让用户移除 DeepSeek 定时提醒。
