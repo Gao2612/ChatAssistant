@@ -36,3 +36,21 @@
 - 标准流程：`show --source codex --status pending` 看待认领 → `claim --task <id> --owner codex --source codex` 认领 → 每完成一步 `progress --task <id> --text "..." --status in_progress --percent <n>` → 完成时 `progress --task <id> --text "完成：..." --status completed --percent 100`。
 - 详细命令、HTTP 接口、提示词模板与冒烟验收见：`G:\codex\team-board\CODEX_BOARD_GUIDE.md`。
 - 约定：不要手工编辑 `board.json`；只读 `source=deepseek` 的任务，不要改动或重排；不能访问 127.0.0.1 时先报告网络/沙箱限制。
+
+## Codex 分派任务（2026-10-18，待认领）
+
+DeepSeek Lead 已将卡点任务分派到看板 **source=codex**，Codex 请先读
+[docs/windows/CODEX_ASSIGNED_TASKS_2026-10-18.md](docs/windows/CODEX_ASSIGNED_TASKS_2026-10-18.md)
+并在看板认领：
+
+| 任务 | 内容 |
+| --- | --- |
+| C1 | 修复 App 内自动查找微信对话按钮路径（UI 触发 search_not_found/result_not_found，代码级已 ok=true） |
+| C2 | T12-01 0.4.x→0.5.7 真实升级/卸载/数据保留 + 干净环境回归 |
+| C3 | T12-03 真实窗口停靠/弹窗/最小化/托盘恢复验收自动化 |
+| C4 | 自动找对话 OCR 名字误识改进（郜亚禹类，保持 fail-closed） |
+| C5 | T9/T10 替代验收：本地合成模型服务 + 双源仿真 |
+
+认领命令：
+`& G:\codex\wechat-lite-venv\Scripts\python.exe G:\codex\team-board\board.py claim --task C1 --owner codex --source codex`
+（C2–C5 同理；只写 `source=codex`，不要改动 `source=deepseek` 的任务。）
