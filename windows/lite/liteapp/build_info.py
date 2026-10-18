@@ -21,7 +21,7 @@ import sys
 from datetime import datetime, timezone
 
 SCHEMA_VERSION = 1
-APP_VERSION = "0.5.11"
+APP_VERSION = "0.5.12"
 
 SOURCE_ROOT = Path(__file__).resolve().parent.parent  # windows/lite
 INCLUDE_SUFFIXES = {".py", ".ps1", ".iss", ".txt", ".md", ".html", ".json"}

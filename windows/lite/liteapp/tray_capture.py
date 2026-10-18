@@ -19,6 +19,24 @@ from .discovery import WindowTarget, valid, window_status
 
 _u32 = ctypes.windll.user32
 _gdi32 = ctypes.windll.gdi32
+# 64-bit GDI handles do not fit ctypes' default int return/argument conversion;
+# without these declarations PrintWindow capture intermittently raises
+# "int too long to convert" and the tray reader reports "无法读取画面".
+_u32.GetWindowDC.argtypes = [wt.HWND]
+_u32.GetWindowDC.restype = ctypes.c_void_p
+_u32.ReleaseDC.argtypes = [wt.HWND, ctypes.c_void_p]
+_gdi32.CreateCompatibleDC.argtypes = [ctypes.c_void_p]
+_gdi32.CreateCompatibleDC.restype = ctypes.c_void_p
+_gdi32.CreateCompatibleBitmap.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int]
+_gdi32.CreateCompatibleBitmap.restype = ctypes.c_void_p
+_gdi32.SelectObject.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+_gdi32.SelectObject.restype = ctypes.c_void_p
+_gdi32.DeleteObject.argtypes = [ctypes.c_void_p]
+_gdi32.DeleteDC.argtypes = [ctypes.c_void_p]
+_gdi32.GetDIBits.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint,
+                             ctypes.c_uint, ctypes.c_void_p, ctypes.c_void_p,
+                             ctypes.c_uint]
+_u32.PrintWindow.argtypes = [wt.HWND, ctypes.c_void_p, wt.UINT]
 
 SW_HIDE = 0
 SW_SHOWNOACTIVATE = 4

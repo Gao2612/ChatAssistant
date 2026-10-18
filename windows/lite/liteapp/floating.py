@@ -44,6 +44,7 @@ class FloatingAssistant(QWidget):
                          | Qt.WindowType.WindowStaysOnTopHint)
         self.host = host
         self._drag_offset = None
+        self.setWindowTitle("ChatAssistant · 悬浮")
         self.setObjectName("floatingPanel")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet(FLOATING_STYLE)
