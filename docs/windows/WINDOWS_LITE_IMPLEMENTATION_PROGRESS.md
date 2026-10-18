@@ -69,7 +69,7 @@
 | T8 档案/趋势/统计/任务界面 | ✅ 2026-10-18 完成，commit `0000cd4` | history_statistics/profile_ui + history_ui 五标签；定向 41/68 项、真实 T7 联调通过；PySide6 关闭期崩溃已修；DPI 真实屏幕留 T12 |
 | T9 记忆检索与实时建议整合 | 🟡 UI 集成完成（今日提交）：会话↔联系人绑定 + 历史参考注入 + “参考历史 N 条”入口；真实模型长上下文/引用展示实机验收留 T12 | 未绑定不检索；切换会话/窗口失效；434/634 全量通过；真实模型回合与 T12 集中验收待做 |
 | T10 多微信来源调度 | 🟡 代码完成（registry/scheduler/background monitor + 15 项测试，UI 开关默认关闭、最多 2 个后台来源）；真实双窗口 30 分钟与 CPU/句柄趋势留 T12 | active 优先、后台默认关闭、最小化暂停、帧未变不重复 OCR、单源关闭不影响其他；后台不移动/不键入窗口 | `source_registry.py`/`capture_scheduler.py` |
-| T11 构建追溯与安装生命周期 | ✅ 代码/构建/隔离安装已验证（干净 VM 归 T12）；0.4.1 已重建并验证（build_info 摘要 clean、中文安装器、隔离 install/self-test/uninstall 保留数据 ok=true、安装版 version/self-test/smoke×3 exit 0）；干净 VM 与真实升级留 T12 | 候选包 0.5.13 SHA256 `FD749F54…1373939`（0.4.x/0.5.0–0.5.12 为中间包）；安装版 0.5.13 已覆盖安装到 `E:\ChatAssistantLite` |
+| T11 构建追溯与安装生命周期 | ✅ 代码/构建/隔离安装已验证（干净 VM 归 T12）；0.4.1 已重建并验证（build_info 摘要 clean、中文安装器、隔离 install/self-test/uninstall 保留数据 ok=true、安装版 version/self-test/smoke×3 exit 0）；干净 VM 与真实升级留 T12 | 候选包 0.5.15 SHA256 `AD7F3DDF…C92375DA`（0.4.x/0.5.0–0.5.14 为中间包）；安装版 0.5.15 已覆盖安装到 `E:\ChatAssistantLite` |
 | T12 集中实机验收 | 🟡 自动项已通过（3×644 回归、单实例、版本无泄露、自检 fail-closed、隔离安装生命周期）；真实微信场景待人工；候选包 0.4.1（SHA256 `F8EC437C…2DC69E`）已装；自动项（version/self-test/smoke×3、隔离 install 生命周期）通过，11 项真实场景逐项进行中 | 面板 S-V01…S-V11，做一项同步一项；人工扫码/输入法/弹窗/双窗口等待用户在场 |
 | S-安装包中文化 | ✅ commit `f9e7c6d` | 内置简体中文语言文件（向导/卸载/任务/启动描述），ISCC 编译通过；随下一版安装包生效 |
 | S-回复风格扩充 | ✅ commit `f9e7c6d` | 9 个预设 + 可自定义、禁滚轮、自定义文本保留；16 项 UI 定向通过 |
@@ -143,3 +143,10 @@
 - 球模式下主窗口只保留设置/历史，聊天页与右侧 AI 面板隐藏；主窗关闭回到球，球“退出”结束进程；`floating_ball` 持久化。
 - 0.5.13 已安装（SHA `FD749F54…1373939`）；全量 755 OK/37 skipped。
 - C6 已更新为“悬浮球真实化/不确定行为”，C7 托盘读取、C8 布局/模型迁移继续排给 Codex 14:51。
+### 好感度/固定联系人/专属档案（2026-10-18 13:30）
+
+- `affection.py`：参考 crush-monitor 6 维本地估算（权重 15/20/20/15/20/10，边界封顶 25）；悬浮球显示分数环/等级/维度，标注“本地估算”。
+- `favorite_contacts`：悬浮球“固定”按钮；只自动分析固定联系人，非固定需手动按钮。
+- `contact_profile.py`：DPAPI 加密 `contact_profiles.dat`；生成专属风格时保存联系人档案；悬浮球“档案”打开历史页。
+- 0.5.15 已安装（SHA `AD7F3DDF…C92375DA`）；全量 799 OK/37 skipped。
+- 遗留：真实 settings 被合成配置覆盖，DeepSeek API Key 需重填（路径/模型/账号已恢复）；模型化好感度/导入自动档案/同名匹配交 Codex C9-C11。
