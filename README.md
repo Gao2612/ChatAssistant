@@ -183,9 +183,9 @@ JDK 17 + Android SDK（platform 35 / build-tools 35）。
 
 ## Windows Lite 0.5.21 备份状态（2026-10-18）
 
-- 备份分支：`feat/windows-lite`（提交 `c02ac4b`、`2ff787c`）；仅作半成品备份，未验收项见下方报告。
-- 安装包：`windows/lite/dist-release/ChatAssistantLite-Setup.exe`（0.5.21，已通过安装→自检→卸载 smoke，`package-0.5.21.log`）。
+- 备份分支：`feat/windows-lite`（`c02ac4b` 应用备份，最新说明提交 `d577ca8`）；已推送 GitHub，仅作半成品备份，未验收项见下方报告。
+- 安装包：`windows/lite/dist-release/ChatAssistantLite-Setup.exe`（0.5.21，SHA256 `D15FDAAE8B344A3FA70740312CC846056761DE56B672459103E7108532F42C10`；本机隔离安装→自检→卸载通过）。
 - 功能报告：[docs/windows/FEATURE_REPORT_2026-10-18.md](docs/windows/FEATURE_REPORT_2026-10-18.md)（已完成/未验收/风险/实测步骤）。
-- 本轮交付摘要：看板/互审协作系统、C13 屏外窗口恢复、C8-FIX 完整 ID 与回归、C1 完成信号竞态修复（真实 UI `not_foreground` 未验收）、悬浮球/桌面图标与设置页分组规划。
-- 未验收/风险：C1 真实 UI 前台丢失、C10 档案链路、C11 同名作用域、C7 托盘抓帧恢复竞争、C14/C15 视觉布局、C17 测试清理；全量 909 OK / 42 skipped。
-- 边界：本次备份由 DeepSeek Harness 生成，未推送 `main`，不包含密钥、真实聊天记录或本地配置；未验收项不得视为已修复。
+- 本轮交付摘要：看板/互审协作系统、C13 屏外窗口恢复、C8-FIX 完整 ID 与回归、C1 完成信号竞态修复（真实 UI `not_foreground` 未验收）、悬浮球/桌面图标资源。
+- 未验收/风险：C1 真实 UI 前台丢失、C7 托盘抓帧恢复竞争、C9/C10/C11/C12 模型/档案问题、C14/C15 视觉布局、C17 测试清理；全量 909 OK / 42 skipped。
+- 边界：本次备份推送到 `feat/windows-lite`，未推送 `main`，不包含密钥、真实聊天记录或本地配置；未验收项不得视为已修复。
