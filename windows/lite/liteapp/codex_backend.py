@@ -136,7 +136,8 @@ class CodexAppServer:
         try:
             self.process = subprocess.Popen(
                 argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                text=True, encoding="utf-8", errors="replace", bufsize=1, cwd=_workspace())
+                text=True, encoding="utf-8", errors="replace", bufsize=1, cwd=_workspace(),
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         except OSError:
             self.process = None
             raise ValueError("无法启动 Codex app-server，请检查 Codex 安装路径。") from None

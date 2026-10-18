@@ -186,13 +186,9 @@ def find_conversation(window, title, *, backend=None, capture=None, reader=None,
         _text, x0, y0, x1, y1 = candidates[0]
         backend.click(hwnd, (x0 + x1) // 2, (y0 + y1) // 2)
         time.sleep(settle)
-        # Some WeChat builds select the result but keep the search overlay until
-        # Enter; harmless when the overlay is already closed.
-        try:
-            backend.key_combo((0x0D,))
-        except (OSError, RuntimeError):
-            pass
-        time.sleep(settle)
+        # Never press Enter here: once the result opens, focus can return to an
+        # existing draft, and Enter would send it. Verify the clicked result;
+        # builds that keep the overlay open must fail closed instead.
         steps.append("verify")
         matched = False
         for _attempt in range(4):

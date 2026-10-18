@@ -171,12 +171,67 @@ class NoWheelComboBox(QComboBox):
     def wheelEvent(self, event):  # noqa: N802 - Qt API name
         event.ignore()
 
+    def paintEvent(self, event):  # noqa: N802
+        super().paintEvent(event)
+        # Qt's styled Windows combo can lose the native arrow under QSS.
+        # Keep the selection affordance visible for every settings dropdown.
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(QPen(QColor('#37423D' if self.isEnabled() else '#A4AAA6'), 1.6))
+        x, y = self.width() - 14, self.height() // 2
+        painter.drawLine(x - 4, y - 2, x, y + 2)
+        painter.drawLine(x, y + 2, x + 4, y - 2)
+
+
+class ModelComboBox(NoWheelComboBox):
+    """Editable model catalog; request IDs remain separate from labels."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setEditable(True)
+        self.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+
+    def text(self):
+        return selected_model_id(self)
+
+    def setText(self, value):
+        self.setEditText(value)
+
+
+class PreviewScrollArea(QScrollArea):
+    resized = Signal()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.resized.emit()
+
+
+def selected_model_id(combo):
+    index = combo.currentIndex()
+    if index >= 0 and combo.currentText() == combo.itemText(index):
+        return str(combo.itemData(index) or combo.currentText()).strip()
+    return combo.currentText().strip()
+
+
+def populate_models(combo, models, preferred='', require_preferred=False):
+    combo.blockSignals(True)
+    combo.clear()
+    for display, model_id in models:
+        combo.addItem(display, model_id)
+    index = combo.findData(preferred)
+    missing = require_preferred and preferred and index < 0
+    combo.setCurrentIndex(index if index >= 0 else (0 if models and not missing else -1))
+    if missing and combo.isEditable():
+        combo.setEditText('')
+    combo.blockSignals(False)
+
 
 class SettingsPage(QWidget):
     saved = Signal(object)
     cancel_requested = Signal()
     codex_done = Signal(object, str)
     models_done = Signal(object, str)
+    reading_models_done = Signal(object, str)
     disconnect_requested = Signal()
     account_action = Signal(str, str)
     model_remembered = Signal(str)
@@ -184,6 +239,11 @@ class SettingsPage(QWidget):
     def __init__(self, config, parent=None):
         super().__init__(parent)
         self.config = dict(config)
+        self._model_request = 0
+        self._reading_request = 0
+        self._codex_models = []
+        self._codex_request = 0
+        self._reading_choices = {config.get('reading_backend', 'ocr'): config.get('reading_model', '')}
         self.setObjectName("settingsPage")
         outer = QVBoxLayout(self)
         outer.setContentsMargins(24, 22, 24, 18)
@@ -237,15 +297,24 @@ class SettingsPage(QWidget):
         self.reading_backend.currentIndexChanged.connect(self.reading_changed)
         self.reading_base = QLineEdit(config.get("reading_base_url", ""))
         self.reading_base.setPlaceholderText("多模态读取接口地址，例如 https://api.example.com/v1")
-        self.reading_model = QLineEdit(config.get("reading_model", ""))
-        self.reading_model.setPlaceholderText("多模态模型名称；Codex 读取留空用默认模型")
+        self.reading_model = ModelComboBox()
+        self.reading_model.setEditText(config.get("reading_model", ""))
+        self.reading_model.lineEdit().setPlaceholderText("读取模型 ID；从服务列表选择或手动输入")
+        self.fetch_reading_models_button = QPushButton("读取模型列表")
+        self.fetch_reading_models_button.clicked.connect(self.fetch_reading_models)
+        self.reading_models_done.connect(self.reading_models_checked)
+        self.reading_model_status = label("", True)
         self.reading_key = QLineEdit(config.get("reading_api_key", ""))
         self.reading_key.setEchoMode(QLineEdit.EchoMode.Password)
         reading_form.addRow("读取后端", self.reading_backend)
         reading_form.addRow("视觉接口地址", self.reading_base)
-        reading_form.addRow("读取模型", self.reading_model)
+        reading_model_row = QHBoxLayout()
+        reading_model_row.addWidget(self.reading_model, 1)
+        reading_model_row.addWidget(self.fetch_reading_models_button)
+        reading_form.addRow("读取模型", reading_model_row)
         reading_form.addRow("读取 API Key", self.reading_key)
         reading_layout.addLayout(reading_form)
+        reading_layout.addWidget(self.reading_model_status)
         reading_layout.addWidget(label(
             "本地 OCR 完全离线、不上传画面；选择多模态模型或 Codex 时，只有当前聊天画面会发送给"
             "所选服务用于转写文字。接入的聊天内容只作为数据处理，不会触发工具或发送消息。", True))
@@ -316,6 +385,10 @@ class SettingsPage(QWidget):
         self.models_done.connect(self.models_checked)
         self.base.editingFinished.connect(self.auto_fetch_models)
         self.key.editingFinished.connect(self.auto_fetch_models)
+        self.base.textChanged.connect(self.invalidate_models)
+        self.key.textChanged.connect(self.invalidate_models)
+        self.reading_base.textChanged.connect(self.invalidate_reading_models)
+        self.reading_key.textChanged.connect(self.invalidate_reading_models)
         auth_row = QHBoxLayout()
         self.chatgpt_button = QPushButton("连接 ChatGPT 套餐")
         self.usage_button = QPushButton("查看 ChatGPT Usage")
@@ -335,7 +408,7 @@ class SettingsPage(QWidget):
         self.auto_analysis.setChecked(bool(config.get("auto_analysis", True)))
         self.dock_wechat = QCheckBox(
             "停靠微信窗口（会移动/缩放原生微信；默认关闭，推荐镜像预览）")
-        self.dock_wechat.setChecked(bool(config.get("dock_wechat", True)))
+        self.dock_wechat.setChecked(bool(config.get("dock_wechat", False)))
         self.background_monitor = QCheckBox(
             "后台监控其他正常微信窗口（默认关闭，最多 2 个；不移动、不键入）")
         self.background_monitor.setChecked(bool(config.get("background_monitor", False)))
@@ -386,6 +459,7 @@ class SettingsPage(QWidget):
         codex_form = QFormLayout()
         self.codex_path = QLineEdit(config.get("codex_path", ""))
         self.codex_path.setPlaceholderText("留空自动查找官方 Codex；也可填写 codex.exe 路径")
+        self.codex_path.textChanged.connect(self.invalidate_codex_models)
         codex_form.addRow("Codex 程序", self.codex_path)
         codex_layout.addLayout(codex_form)
         codex_row = QHBoxLayout()
@@ -429,9 +503,57 @@ class SettingsPage(QWidget):
 
     def reading_changed(self):
         backend = self.reading_backend.currentData()
+        previous = getattr(self, '_previous_reading_backend', None)
+        if previous is not None:
+            self._reading_choices[previous] = self.reading_model.text()
+        self._previous_reading_backend = backend
+        self._reading_request += 1
+        choices = [(m['display_name'], m['id']) for m in self._codex_models
+                   if 'image' in m.get('input_modalities', [])] if backend == 'codex' else []
+        preferred = self._reading_choices.get(backend, '')
+        populate_models(self.reading_model, choices, preferred, require_preferred=bool(choices))
+        if not choices:
+            self.reading_model.setEditText(preferred)
         self.reading_base.setEnabled(backend == "api")
         self.reading_model.setEnabled(backend in ("api", "codex"))
         self.reading_key.setEnabled(backend == "api")
+        self.fetch_reading_models_button.setEnabled(backend in ('api', 'codex'))
+
+    def invalidate_reading_models(self):
+        self._reading_request += 1
+        self.reading_model.clear()
+        self.reading_model_status.setText('服务配置已变化，请重新读取模型列表。')
+        self.fetch_reading_models_button.setEnabled(self.reading_backend.currentData() in ('api', 'codex'))
+
+    def fetch_reading_models(self):
+        if self.reading_backend.currentData() == 'codex':
+            self.detect_codex()
+            return
+        if self.reading_backend.currentData() != 'api':
+            return
+        self._reading_request += 1
+        context = (self._reading_request, self.reading_backend.currentData(), self.reading_base.text(), self.reading_key.text())
+        snapshot = dict(backend='api', base_url=self.reading_base.text().strip(), api_key=self.reading_key.text().strip())
+        self.fetch_reading_models_button.setEnabled(False)
+        self.reading_model_status.setText('正在读取模型列表；请确认所选模型支持图像输入。')
+        def work():
+            try:
+                models, error = analysis.list_models(snapshot), ''
+            except Exception as exc:
+                models, error = None, str(exc) if isinstance(exc, ValueError) else '读取模型列表失败。'
+            self.reading_models_done.emit((context, models), error)
+        threading.Thread(target=work, daemon=True).start()
+
+    def reading_models_checked(self, result, error):
+        context, models = result
+        if context != (self._reading_request, self.reading_backend.currentData(), self.reading_base.text(), self.reading_key.text()):
+            return
+        self.fetch_reading_models_button.setEnabled(True)
+        if error or not models:
+            self.reading_model_status.setText(error or '接口没有返回可用模型。')
+            return
+        populate_models(self.reading_model, models, self.reading_model.text())
+        self.reading_model_status.setText(f'已读取 {len(models)} 个模型；列表不保证图像能力，请选择支持视觉的模型。')
 
     def update_chatgpt_state(self, config):
         connected = backends.chatgpt_connected(config)
@@ -486,12 +608,16 @@ class SettingsPage(QWidget):
         if backend:
             current["backend"] = backend
             if backend in ("api", "local", "codex"):
-                current["model"] = self.model.currentText().strip()
+                current["model"] = selected_model_id(self.model)
+                current[backends.MODEL_FIELDS[backend]] = current['model']
         self.effective_label.setText("当前生效：" + backends.describe_analysis(current))
 
     def backend_changed(self):
         backend = self.backend.currentData()
+        self._model_request += 1
         editable = backend in ("api", "local", "codex")
+        self.model.blockSignals(True)
+        self.model.clear()
         self.model.setEditable(editable)
         remembered = backends.remembered_model(self.config, backend)
         if backend == "chatgpt":
@@ -508,13 +634,16 @@ class SettingsPage(QWidget):
             if index >= 0:
                 self.model.setCurrentIndex(index)
         elif backend == "api":
-            self.model.setEditText(remembered or "deepseek-chat")
+            self.model.setEditText(remembered)
+        elif backend == 'codex' and self._codex_models:
+            populate_models(self.model, [(m['display_name'], m['id']) for m in self._codex_models], remembered, require_preferred=True)
         else:
             self.model.setEditText(remembered)
+        self.model.blockSignals(False)
         self.base.setEnabled(backend in ("api", "local"))
         self.key.setEnabled(backend in ("api", "local"))
         self.provider.setEnabled(backend == "api")
-        self.fetch_models_button.setEnabled(backend in ("api", "local"))
+        self.fetch_models_button.setEnabled(backend in ("api", "local", "codex"))
         self.refresh_effective()
 
     def provider_changed(self):
@@ -523,13 +652,24 @@ class SettingsPage(QWidget):
             self.base.setText(base)
             self.refresh_effective()
 
+    def invalidate_models(self):
+        self._model_request += 1
+        self.model.clear()
+        self.model_status.setText('服务配置已变化，请重新读取模型列表或填写服务商模型 ID。')
+        self.fetch_models_button.setEnabled(self.backend.currentData() in ('api', 'local', 'codex'))
+
     def fetch_models(self):
         backend = self.backend.currentData()
+        if backend == 'codex':
+            self.detect_codex()
+            return
         if backend not in ("api", "local"):
             self.model_status.setText("只有“兼容模型 API / 本地模型服务”可以读取模型列表。")
             return
         snapshot = dict(self.config, backend=backend, base_url=self.base.text().strip(),
                         api_key=self.key.text().strip())
+        self._model_request += 1
+        context = (self._model_request, backend, self.base.text(), self.key.text())
         self.fetch_models_button.setEnabled(False)
         self.model_status.setText("正在读取接口模型列表…")
 
@@ -540,7 +680,7 @@ class SettingsPage(QWidget):
             except Exception as exc:
                 models, error = None, (str(exc) if isinstance(exc, ValueError)
                                        else "读取模型列表失败，请检查地址与 Key。")
-            self.models_done.emit(models, error)
+            self.models_done.emit((context, models), error)
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -555,18 +695,16 @@ class SettingsPage(QWidget):
         self.fetch_models()
 
     def models_checked(self, models, error):
+        if isinstance(models, tuple) and len(models) == 2 and isinstance(models[0], tuple):
+            context, models = models
+            if context != (self._model_request, self.backend.currentData(), self.base.text(), self.key.text()):
+                return
         self.fetch_models_button.setEnabled(self.backend.currentData() in ("api", "local"))
         if error or not models:
             self.model_status.setText(error or "接口没有返回可用模型。")
             return
-        current = self.model.currentText().strip()
-        self.model.clear()
-        for display, model_id in models:
-            self.model.addItem(display, model_id)
-        index = self.model.findData(current)
-        if index < 0:
-            index = self.model.findText(current)
-        self.model.setCurrentIndex(index if index >= 0 else 0)
+        current = selected_model_id(self.model)
+        populate_models(self.model, models, current)
         self.model_status.setText(f"已读取 {len(models)} 个模型，请选择后保存设置。")
         self.refresh_effective()
 
@@ -580,6 +718,9 @@ class SettingsPage(QWidget):
             self.disconnect_requested.emit()
 
     def set_models(self, models):
+        self.config['subscription_models'] = list(models or [])
+        if self.backend.currentData() != 'chatgpt':
+            return
         remembered = backends.remembered_model(self.config, "chatgpt")
         selected = remembered or self.config.get("model")
         self.model.clear()
@@ -616,7 +757,7 @@ class SettingsPage(QWidget):
                 if not model:
                     raise ValueError("请先连接 ChatGPT 并读取账号模型目录。")
             else:
-                model = self.model.currentText().strip()
+                model = selected_model_id(self.model)
                 if not model:
                     raise ValueError("请先读取或输入模型名称。")
             cfg = dict(self.config, wechat_path=self.path.text().strip().strip('"'),
@@ -647,6 +788,8 @@ class SettingsPage(QWidget):
             self.error.setText(str(exc))
 
     def detect_codex(self):
+        self._codex_request += 1
+        context = (self._codex_request, self.codex_path.text())
         self.codex_button.setEnabled(False)
         self.codex_status.setText("正在启动 Codex app-server 读取账号与模型（不会请求模型生成）…")
         config = dict(self.config, codex_path=self.codex_path.text().strip())
@@ -658,11 +801,25 @@ class SettingsPage(QWidget):
             except Exception as exc:
                 info = None
                 error = str(exc) if isinstance(exc, ValueError) else "Codex 检测失败，请检查安装与登录状态。"
-            self.codex_done.emit(info, error)
+            self.codex_done.emit((context, info), error)
 
         threading.Thread(target=work, daemon=True).start()
 
+    def invalidate_codex_models(self):
+        self._codex_request += 1
+        self._codex_models = []
+        self.codex_button.setEnabled(True)
+        if self.backend.currentData() == 'codex':
+            self.model.clear()
+        if self.reading_backend.currentData() == 'codex':
+            self.reading_model.clear()
+        self.codex_status.setText('Codex 路径已变化，请重新检测账号与模型。')
+
     def codex_checked(self, info, error):
+        if isinstance(info, tuple):
+            context, info = info
+            if context != (self._codex_request, self.codex_path.text()):
+                return
         self.codex_button.setEnabled(True)
         if error or not info:
             self.codex_status.setText(error or "Codex 检测失败。")
@@ -674,13 +831,17 @@ class SettingsPage(QWidget):
             self.codex_status.setText(f"已连接 Codex（{plan}），模型 {len(models)} 个：{names}")
         else:
             self.codex_status.setText(f"已连接 Codex（{plan}），但账号没有返回可选模型。")
-        if models and self.backend.currentData() == "codex":
-            self.model.clear()
-            for item in models:
-                self.model.addItem(item["display_name"], item["id"])
-            self.model.setCurrentIndex(0)
-        if models and not self.reading_model.text().strip():
-            self.reading_model.setText(models[0]["id"])
+        self._codex_models = models
+        if self.backend.currentData() == "codex":
+            preferred = selected_model_id(self.model) or backends.remembered_model(self.config, 'codex')
+            populate_models(self.model, [(m['display_name'], m['id']) for m in models], preferred, require_preferred=True)
+            if preferred and self.model.findData(preferred) < 0:
+                self.model_status.setText('原 Codex 模型已不在当前目录，请明确选择可用模型后保存。')
+        if self.reading_backend.currentData() == 'codex':
+            preferred = self.reading_model.text()
+            visual = [(m['display_name'], m['id']) for m in models if 'image' in m.get('input_modalities', [])]
+            populate_models(self.reading_model, visual, preferred, require_preferred=True)
+            self.reading_model_status.setText('已读取支持图像的 Codex 模型。' if visual else '未返回支持图像的 Codex 模型。')
 
 
 # Kept as an import alias for existing downstream scripts using the settings editor.
@@ -805,7 +966,7 @@ class MainWindow(QMainWindow):
     def __init__(self, config=None, scanning=True, window_manager=None, account_store=None,
                  inference_queue=None):
         super().__init__()
-        self.setWindowTitle("微信实时助手 · 便捷版 0.5.7")
+        self.setWindowTitle("微信实时助手 · 便捷版 0.5.8")
         self.resize(1000, 520)
         self.setMinimumSize(900, 500)
         self.setStyleSheet(STYLE)
@@ -954,15 +1115,30 @@ class MainWindow(QMainWindow):
         chat_content_layout = QVBoxLayout(chat_content)
         chat_content_layout.setContentsMargins(12, 10, 12, 10)
         chat_content_layout.setSpacing(8)
-        chat_content_layout.addWidget(label("聊天画面（只读）", True))
+        preview_header = QHBoxLayout()
+        preview_header.addWidget(label("聊天画面（只读镜像，可滚动查看）", True), 1)
+        self.preview_zoom = NoWheelComboBox()
+        for display, value in (('适应区域', 0), ('原始大小（100%）', 1), ('放大 150%', 1.5), ('放大 200%', 2)):
+            self.preview_zoom.addItem(display, value)
+        self.preview_zoom.setCurrentIndex(1)
+        self.preview_zoom.setAccessibleName('聊天画面缩放')
+        self.preview_zoom.currentIndexChanged.connect(self.render_preview)
+        preview_header.addWidget(self.preview_zoom)
+        chat_content_layout.addLayout(preview_header)
         self.preview = QLabel("连接微信后，当前聊天画面会显示在这里\n右侧会同步给出建议")
         self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.preview.setMinimumHeight(200)
         self.preview.setStyleSheet(
             "background: #F1EFE8; border: 1px dashed #D5D1C6; border-radius: 8px; "
-            "color: #6B746E; padding: 18px;")
+            "color: #6B746E; padding: 2px;")
         self.preview_image = None
-        chat_content_layout.addWidget(self.preview, 1)
+        self.preview_scroll = PreviewScrollArea()
+        self.preview_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self.preview_scroll.setMinimumHeight(200)
+        self.preview_scroll.setWidgetResizable(True)
+        self.preview_scroll.setWidget(self.preview)
+        self.preview_scroll.resized.connect(self.render_preview)
+        chat_content_layout.addWidget(self.preview_scroll, 1)
         chat_content_layout.addWidget(label("识别到的聊天文字（只读）", True))
         self.editor = QPlainTextEdit()
         self.editor.setReadOnly(True)
@@ -1097,11 +1273,37 @@ class MainWindow(QMainWindow):
         if not pixmap.loadFromData(image):
             return
         self.preview_image = pixmap
-        self.preview.setPixmap(pixmap.scaled(self.preview.size(), Qt.AspectRatioMode.KeepAspectRatio,
-                                             Qt.TransformationMode.SmoothTransformation))
+        self.render_preview()
+
+    def render_preview(self, _index=0):
+        if getattr(self, 'preview_image', None) is None:
+            return
+        pixmap = self.preview_image
+        zoom = self.preview_zoom.currentData()
+        if self._dock_enabled():
+            zoom = 0
+        if zoom:
+            target = pixmap.size() * float(zoom)
+            rendered = pixmap.scaled(target, Qt.AspectRatioMode.KeepAspectRatio,
+                                     Qt.TransformationMode.SmoothTransformation)
+            self.preview_scroll.setWidgetResizable(False)
+            self.preview.setFixedSize(rendered.width() + 6, rendered.height() + 6)
+        else:
+            self.preview.setMinimumSize(0, 200)
+            self.preview.setMaximumSize(16777215, 16777215)
+            self.preview_scroll.setWidgetResizable(True)
+            target = self.preview_scroll.viewport().size()
+            target.setWidth(max(1, target.width() - 6))
+            target.setHeight(max(1, target.height() - 6))
+            rendered = pixmap.scaled(target, Qt.AspectRatioMode.KeepAspectRatio,
+                                     Qt.TransformationMode.SmoothTransformation)
+        self.preview.setPixmap(rendered)
 
     def clear_preview(self):
         self.preview_image = None
+        self.preview.setMinimumSize(0, 200)
+        self.preview.setMaximumSize(16777215, 16777215)
+        self.preview_scroll.setWidgetResizable(True)
         self.preview.clear()
         self.preview.setText("连接微信后，当前聊天画面会显示在这里\n右侧会同步给出建议")
 
@@ -1239,10 +1441,13 @@ class MainWindow(QMainWindow):
         self._close_aperture()
 
     def _dock_enabled(self):
-        """Mirror preview by default; legacy configs/tests without the key keep docking."""
-        return bool(self.config.get("dock_wechat", True))
+        """Native resizing always requires an explicit opt-in, including legacy configs."""
+        return bool(self.config.get("dock_wechat", False))
 
     def sync_dock(self):
+        if getattr(self, 'wechat_busy', False):
+            self._close_aperture()
+            return
         manager = getattr(self, "window_manager", None)
         if manager is None:
             self._close_aperture()
@@ -1627,9 +1832,7 @@ class MainWindow(QMainWindow):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        if getattr(self, "preview_image", None) is not None:
-            self.preview.setPixmap(self.preview_image.scaled(self.preview.size(),
-                Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        self.render_preview()
         manager = getattr(self, "window_manager", None)
         if manager is not None and manager.attached:
             QTimer.singleShot(0, self.sync_dock)
@@ -2618,6 +2821,24 @@ class MainWindow(QMainWindow):
                                            else "远程读取完成 · 中央实时画面")
                 if changed:
                     self.analysis_status.setText("已读取新对话，等待分析")
+        elif not accepted and not (self.pending_read is not None and self.frame_freshness.accepts(self.pending_read.get('frame_seq', 0))):
+            # A visual-only update may supersede the remote frame without causing
+            # the worker to request another read (the OCR text is unchanged).
+            # Accept only a freshly confirmed local snapshot, never stale output.
+            fallback = self.last_ocr_snapshot
+            if fallback and self.frame_freshness.accepts(fallback[2]):
+                self.state.update(fallback[0], fallback[1])
+                self._remember_recent(fallback[0], fallback[1])
+                self._note_conversation_title(fallback[0])
+                self.set_editor(self.state.text)
+                if fallback[0]:
+                    self.chat_title.setText(fallback[0])
+                if self.state.ready:
+                    self.reading_ok_token = self.state.token
+                    self.changed_at = time.monotonic()
+                    self.clear_results()
+                    self.analysis_status.setText('远程读取画面已过期，已采用最新本地 OCR，等待分析')
+                    self.set_notice('已丢弃旧画面的远程读取结果，回退最新本地 OCR。')
         pending, self.pending_read = self.pending_read, None
         if pending is not None and self.frame_freshness.accepts(pending.get("frame_seq", 0)):
             self.queue_remote_read(pending)

@@ -1,5 +1,36 @@
 # Windows Lite 整改执行进度
 
+## 2026-10-18 续跑重新审查（0.5.8 工作区，未提交）
+
+本节优先于下方旧任务表中的中间状态。用户要求重点重审 `WINDOWS_LITE_UNFINISHED_2026-10-18.md`，并补充模型名称不受服务商支持、多个下拉框缺失的问题。本轮采用 3 个子智能体并行核查，主智能体独占 `ui.py` 集成；无 commit/push/发布，无真实聊天上传、无微信发送、无私有令牌读取。
+
+### 实现与定向实测
+
+- 模型目录：已复现并修复“显示名称当请求 ID 保存”、ChatGPT 目录残留到兼容 API、切厂商/地址/Key 后旧目录仍可选、异步旧接口覆盖新接口、Codex 检测误填视觉 API、Codex 路径变化后的晚到结果、空目录保留旧选择、当前模型提示仍显示旧 ID；`GET /models` 只接纳明确 `id`，不从展示名称猜 ID。Codex 原选择已失效时要求用户重新选择，不静默替换。13 项目录回归已通过（分批先红后绿）。真实运营商支持情况仍需真实 Key/额度验证，目录返回也不保证图像能力。
+- 下拉框：读取模型从纯文本框恢复为可编辑下拉框，新增独立读取列表按钮；Codex 图像读取目录过滤 `input_modalities`；所有已有 `NoWheelComboBox` 显式绘制箭头，修复 QSS 下箭头消失的视觉问题。离屏合成设置截图已确认箭头可见；该离屏环境中文字体显示为方框，**不能作为中文字体或真实 DPI 验收证据**。
+- OCR 自动分析：已复现“旧远程读取完成被丢弃、最新 OCR 文本相同所以没有新远程任务、分析门控永久未确认”。现仅在无更新待发远程读取且 OCR 帧仍新鲜时，明确回退最新本地 OCR；旧远程结果始终拒绝。`test_remote_reading_stall` 先失败后通过；与自动链路/远程读取/目录组合 24 项通过。读取解析器拒绝空标题及未知消息归属并触发现有回退，相关 33 项通过。
+- 历史隔离：修复检索构建索引后被另一线程替换，导致 A 证据配 B 文本的竞态；锁覆盖检索全程。修复同名联系人选择首项误选、解除联系人后残留旧报告/趋势/统计。3 项回归先失败后通过，检索 7 项、当前联系人/历史 UI 9 项通过。已有当前联系人 HTML/PDF 导入入口保留，不重复实现。
+- 微信操作：删除查找结果点击后的无条件 Enter，避免焦点回到已有草稿时发送消息；窗口动作期间 `sync_dock` 不重接管。新 2 项回归先失败后通过；查找 5 项、停靠/遮挡 42 项、动作/UI 集成 7 项通过。上述为合成窗口/假后端测试，**A3 设置页真实按钮偶发失败根因仍未证明，仍待验收**。
+- 用户新增桌面问题：原生停靠确会按中间开口调用 `set_pos` 改变微信尺寸；两处缺少 `dock_wechat` 的旧配置回退也曾默认为开启。本轮统一默认/缺省为镜像模式，UI 显示清晰的“只读镜像”提示。中央预览新增 适应区域/100%/150%/200% 缩放和滚动；可保留完整窗口图像，不挤压或缩放正常微信。`test_preview_zoom`、`test_mirror_preview`、`test_ui`、`test_ui_design_system`、`test_window_manager_ui` 合计 41 项通过（全合成 UI，未驱动真实微信）。离屏截图确认箭头与缩放入口可见，但中文字体缺失于此运行环境，不能作为字体实测。
+- “合成聊天/合成弹窗”桌面窗口来自全套测试的真实 Win32 fixture；已停止那次测试，默认运行现在在启动前 SkipTest；只有显式设置 `CHATASSISTANT_NATIVE_DESKTOP_TESTS=1` 才会开桌面夹具。窗口团队用假启动器证明默认不会 Popen；原生测试模块 112 项、37 项被安全跳过、exit 0，期间未创建桌面窗口。Codex app-server 和 Git 版本探测子进程也加 `CREATE_NO_WINDOW`；2 项启动参数测试通过。
+
+### 恢复与未测
+
+- 本机未发现可调用的 deepseekharness 命令、工具或插件；未安装或调用未知工具。后续若可用，按用户授权用于边界明确的编码并独立审查。
+- 已通过自动任务工具恢复 `automation` 为 ACTIVE，保留每小时尝试、无变化安静、额度不能绕过、全部验收后暂停的边界，并加入本次模型/下拉框审查重点。
+- 真实 Key/ChatGPT 额度、真实视觉/API/Codex 回合、人工扫码/输入法/弹窗、双微信 30 分钟、干净 VM、真实升级仍未完成；未将旧 0.5.7 测试冒充本轮证据。
+- 首次全套回归 690 项中有一项暴露窗口标题仍写 0.5.7；标题已同步 0.5.8。之后安全夹具默认跳过，全量 **696 项通过、37 项跳过，exit 0**（`test-output/resume-0.5.8-tests.log`）。
+- 当前候选构建已完成：0.5.8；PyInstaller 6.22.3/Python 3.12.14；source digest `e61444cd3d5a322927d210e649c14167caa295b3b0816a2638a9305d7532b9ee`，137 个源码文件，分支 `feat/windows-lite`，dirty=true（本轮改动未提交）。portable smoke exit 0；安装器 `dist-release/ChatAssistantLite-Setup.exe` 编译成功，SHA-256 `C3E34C98B3663E90BF747B28D73B6791A27108A70EEE5EBAF8C7FF5B862E00E3`；build manifest 检查 `ok=true`；隔离安装/自检/卸载及保留隔离目录通过（所有 exit 0，files_removed/work_dir_preserved/ok=true，日志 `test-output/resume-0.5.8-package.log`）。
+- 用户新截图仍没有缩放控件，因此它显示的是旧版 0.5.7；0.5.8 候选包尚未覆盖安装到用户目录。安装器目前仅做临时目录生命周期验证，未触碰实际安装目录。
+- 账户配置的原始 DPAPI 文件中 `dock_wechat` 已是 false（只检查/写回这个布尔字段，不输出或读取任何凭据字段）；未覆盖安装。0.5.7 仍为当前安装版本。
+
+### 候选包与看板
+
+- 可审查候选安装包：`windows/lite/dist-release/ChatAssistantLite-Setup.exe`；覆盖安装/正式卸载/真实微信画面比例和实机字体仍需后续人工确认。没有提交/推送/发布。
+- 按 `AGENTS.md` 在 Team Board 完成 Codex 接入验收 C0：Codex-only `show`/认领/进度/完成均写到 source=codex，DeepSeek 任务未更改。发现该 CLI `progress` 子命令不接受示例 `--source codex` 参数；用 `TEAM_BOARD_SOURCE=codex` 成功写入，C0 100%。
+
+审查报告（本机忽略目录）：`_reports/resume_pipeline_2026-10-18.md`、`resume_windows_2026-10-18.md`、`resume_history_2026-10-18.md`。
+
 计划：`WINDOWS_LITE_COMPLETION_PLAN_2026-10-17.md`。设计：`WINDOWS_LITE_COMPLETION_DESIGN_2026-10-17.md`。分支 `feat/windows-lite`。用户于 2026-10-17 授权按方案整改，补充要求文字读取和对话分析分别选择本地 OCR、多模态模型、ChatGPT/API、Codex 或已运行的本地模型服务。
 
 **2026-10-18 更新**：读取/分析双后端已落码，86 项单测通过；真实 Codex 免费 RPC 验证通过。详见 [`_reports/backend_read_analysis_split_report.md`](../../_reports/backend_read_analysis_split_report.md) 与 [`WINDOWS_LITE_ACCEPTANCE_CHECKLIST_2026-10-18.md`](WINDOWS_LITE_ACCEPTANCE_CHECKLIST_2026-10-18.md)。

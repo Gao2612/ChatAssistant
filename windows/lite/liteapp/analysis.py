@@ -137,7 +137,8 @@ def list_models(config):
     for row in rows[:500]:
         if not isinstance(row, dict):
             continue
-        model_id = row.get("id") or row.get("model") or row.get("name")
+        # A display name is not a callable model identifier.
+        model_id = row.get("id")
         if not isinstance(model_id, str) or not model_id.strip():
             continue
         model_id = model_id.strip()[:200]

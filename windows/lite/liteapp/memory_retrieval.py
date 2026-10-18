@@ -128,6 +128,13 @@ class MemoryRetriever:
             raise TypeError("scope 必须是 ScopeKey。")
         if not isinstance(query, str):
             raise TypeError("query 必须是字符串。")
+        # The cache belongs to one scope. Keep it stable through scoring and
+        # evidence construction; another caller (or clear) must not replace it
+        # between _build_index and _materialize.
+        with self._lock:
+            return self._retrieve_locked(scope, query, memory_version, max_items, max_bytes)
+
+    def _retrieve_locked(self, scope, query, memory_version, max_items, max_bytes):
         snapshot = self._build_index(scope)
         if int(memory_version) != snapshot.memory_version:
             raise StaleMemoryVersionError(

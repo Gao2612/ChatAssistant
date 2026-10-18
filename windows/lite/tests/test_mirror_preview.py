@@ -53,9 +53,11 @@ class MirrorPreviewTests(unittest.TestCase):
         self._sync()
         self.assertEqual(len(self.manager.named("detach")), 1)
 
-    def test_legacy_config_without_key_keeps_docking_behaviour(self):
+    def test_legacy_config_without_key_never_resizes_wechat(self):
         manager = FakeWindowManager()
-        window = MainWindow(config=make_config(), scanning=False,
+        config = make_config()
+        config.pop('dock_wechat')
+        window = MainWindow(config=config, scanning=False,
                             window_manager=manager)
         self.app.processEvents()
         window.dock_timer.stop()
@@ -68,7 +70,8 @@ class MirrorPreviewTests(unittest.TestCase):
                     patch.object(window, "_aperture_hwnd", return_value=1002):
                 self.app.processEvents()
                 window.sync_dock()
-            self.assertEqual(len(manager.named("attach")), 1)
+            self.assertEqual(len(manager.named("attach")), 0)
+            self.assertFalse(window.settings_page.dock_wechat.isChecked())
         finally:
             window.close()
             self.app.processEvents()

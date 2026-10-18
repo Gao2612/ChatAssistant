@@ -46,7 +46,7 @@ def make_config(**overrides):
         "backend": "api", "model": "api-model", "api_model": "api-model",
         "api_key": "", "style": "自然简短", "auto_connect": False,
         "subscription": None, "subscription_models": [], "_warning": "",
-        "auto_analysis": False,
+        "auto_analysis": False, "dock_wechat": True,
     }
     config.update(overrides)
     return config

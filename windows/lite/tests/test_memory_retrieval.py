@@ -1,6 +1,7 @@
 import hashlib
 import json
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -85,6 +86,55 @@ class MemoryRetrievalTests(unittest.TestCase):
                                      max_items=3, max_bytes=512)
         self.assertLessEqual(len(context.items), 3)
         self.assertLessEqual(context.bytes_used, 512)
+
+    def test_concurrent_contacts_cannot_replace_index_during_retrieval(self):
+        other = self.store.create_person("Alice", "acct-2")
+        import_texts(self.store, self.scope, ["quote synthetic account one"])
+        import_texts(self.store, other, ["quote synthetic account two"], digest="d2")
+        versions = {s: self.store.snapshot(s).memory_version for s in (self.scope, other)}
+        first_built, second_started, second_done = (threading.Event() for _ in range(3))
+        retriever = MemoryRetriever(self.store)
+        original_build = retriever._build_index
+        results, errors = {}, []
+
+        def controlled_build(scope):
+            snapshot = original_build(scope)
+            if scope == self.scope:
+                first_built.set()
+                if not second_started.wait(3):
+                    raise AssertionError("second retrieval never started")
+                # The competing call used to replace the first call's cache here.
+                # With the retrieval lock it waits until the first call completes.
+                second_done.wait(0.5)
+            return snapshot
+
+        retriever._build_index = controlled_build
+
+        def run(scope):
+            try:
+                if scope == other:
+                    if not first_built.wait(3):
+                        raise AssertionError("first retrieval never built its index")
+                    second_started.set()
+                results[scope] = retriever.retrieve(scope, "quote", versions[scope])
+            except Exception as error:
+                errors.append(error)
+            finally:
+                if scope == other:
+                    second_done.set()
+
+        threads = [threading.Thread(target=run, args=(s,)) for s in (self.scope, other)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(5)
+        self.assertFalse(any(t.is_alive() for t in threads))
+        self.assertEqual(errors, [])
+        self.assertEqual(results[self.scope].items[0].text, "quote synthetic account one")
+        self.assertEqual(results[other].items[0].text, "quote synthetic account two")
+        for scope, context in results.items():
+            for item in context.items:
+                self.assertEqual(self.store.read_evidence(item.ref).text, item.text)
 
     def test_persist_uses_encrypted_derived_memory(self):
         folder = tempfile.TemporaryDirectory()

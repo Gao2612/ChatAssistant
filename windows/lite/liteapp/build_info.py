@@ -21,7 +21,7 @@ import sys
 from datetime import datetime, timezone
 
 SCHEMA_VERSION = 1
-APP_VERSION = "0.5.7"
+APP_VERSION = "0.5.8"
 
 SOURCE_ROOT = Path(__file__).resolve().parent.parent  # windows/lite
 INCLUDE_SUFFIXES = {".py", ".ps1", ".iss", ".txt", ".md", ".html", ".json"}
@@ -76,7 +76,8 @@ def _run_git(args, repo):
     if not executable:
         raise OSError("git executable not found")
     return subprocess.run([executable, "-C", str(repo), *args], capture_output=True,
-                          text=True, encoding="utf-8", errors="replace", timeout=30)
+                          text=True, encoding="utf-8", errors="replace", timeout=30,
+                          creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
 
 
 def find_git_root(start=SOURCE_ROOT):

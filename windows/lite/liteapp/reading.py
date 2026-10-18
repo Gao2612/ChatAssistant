@@ -46,6 +46,8 @@ def parse_snapshot(content):
         raise ValueError("读取模型返回格式不正确。")
     title = obj.get("title")
     title = " ".join(title.split())[:120] if isinstance(title, str) else ""
+    if not title:
+        raise ValueError("读取模型没有确认会话名称，已跳过远程结果。")
     rows = obj.get("messages")
     if not isinstance(rows, list) or not rows:
         raise ValueError("读取模型没有识别到聊天消息，请重试或改用本地 OCR。")
@@ -56,7 +58,9 @@ def parse_snapshot(content):
         text = row.get("text")
         if not isinstance(text, str) or not text.strip():
             continue
-        side = "me" if row.get("side") == "me" else "other"
+        side = row.get("side")
+        if side not in ("me", "other"):
+            raise ValueError("读取模型未确认消息归属，已跳过远程结果。")
         name = row.get("name")
         name = " ".join(name.split())[:60] if isinstance(name, str) and side != "me" else ""
         messages.append((side, name, text.strip()[:MAX_TEXT]))

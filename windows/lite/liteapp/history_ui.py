@@ -284,6 +284,8 @@ class HistoryPage(QWidget):
             self.persons.blockSignals(True)
             self.persons.setCurrentIndex(-1)
             self.persons.blockSignals(False)
+            self._invalidate_derived_views(clear_profile=True)
+            self.offset = 0
             self._update_contact_label()
             self.load_page()
             return
@@ -333,7 +335,12 @@ class HistoryPage(QWidget):
         if not people:
             self.status.setText("尚无其他联系人档案；请先导入记录并确认档案。")
             return None
+        # Display names are not identities: make each dialog entry unique so
+        # selecting a later same-name profile cannot resolve to the first one.
         names = [person.display_name for person in people]
+        if len(set(names)) != len(names):
+            names = [f"{person.display_name}（档案 {index + 1} · {person.scope.person_id[:8]}）"
+                     for index, person in enumerate(people)]
         name, ok = self._ask_choice(
             "选择其他联系人",
             "从既有档案中选择（次要入口：独立离线查看/导入，不与当前会话自动绑定）：",
@@ -646,6 +653,8 @@ class HistoryPage(QWidget):
         if clear_profile:
             self._profile_report = None
             self.profile_panel.set_report(None)
+            self.trend_panel.set_report(None)
+            self.report.clear()
 
     # -------------------------------------------------------------- statistics
     def _statistics_key(self, scope):

@@ -32,6 +32,10 @@ never leaves stray windows behind.
 The second half of the module is a small parent-side controller used by the
 test suite (``NativeChatFixture``); running the file as a script starts the
 child window process.
+
+These fixtures create visible desktop windows. They are disabled in ordinary
+test runs; set CHATASSISTANT_NATIVE_DESKTOP_TESTS=1 only on a dedicated test
+desktop when explicitly running the interactive native-window checks.
 """
 
 from __future__ import annotations
@@ -45,6 +49,7 @@ import subprocess
 import sys
 import threading
 import time
+import unittest
 from ctypes import wintypes as W
 
 FIXTURE_PATH = os.path.abspath(__file__)
@@ -594,6 +599,10 @@ class NativeChatFixture:
         self._reader = None
 
     def start(self, timeout=15.0):
+        if os.environ.get("CHATASSISTANT_NATIVE_DESKTOP_TESTS") != "1":
+            raise unittest.SkipTest(
+                "visible native desktop fixtures are opt-in: "
+                "set CHATASSISTANT_NATIVE_DESKTOP_TESTS=1 on a dedicated test desktop")
         command = [sys.executable, FIXTURE_PATH, "--mode", self.mode,
                    "--x", str(self.start_rect[0]), "--y", str(self.start_rect[1]),
                    "--w", str(self.start_rect[2]), "--h", str(self.start_rect[3])]
