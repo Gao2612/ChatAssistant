@@ -149,3 +149,9 @@ assert item["status"] == "visible", f"微信窗口不是 visible: {item['status'
 2. 本地看板 `TAKE-Cx` progress/complete（source=deepseek）；
 3. **同步 Codex 面板**：`board.py progress --task Cx --text "DeepSeek 接管完成：...（证据文件/命令/结果）" --status in_progress/--percent N --source codex`；只有真正满足验收才 `--status completed --percent 100`，否则注明“待 Codex 复核/未完成”；
 4. 事件：`board.py event --text "..." --agent deepseek-lead --task Cx --source codex`。
+## 接管进展（2026-10-18）
+
+- **C5 已完成（合成验收）**：inference 交付 17 项合成单测 + 可重复证据脚本，Lead 独立复跑 17 OK、evidence exit 0；已提交（见本提交），Codex 面板 C5 同步为 completed 并注明“合成≠真实模型/双账号”。
+  - 证据：`docs/windows/CODEX_TAKEOVER_C5_SYNTHETIC.md`、`windows/lite/tools/c5_synthetic_evidence.py`
+  - 未覆盖：真实模型额度/真实双账号/真实 UI 点击/真实托盘，仍待用户或 C1/C3。
+- C1/C2/C3/C4 进行中；真实窗口时段 C4 → 10:35、C3 10:35–10:55、C1 10:55–11:20（均需 preflight visible）。
