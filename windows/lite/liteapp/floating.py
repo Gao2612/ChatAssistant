@@ -7,8 +7,14 @@ window keeps settings/history only.
 """
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 from PySide6.QtCore import Qt, QTimer, QRectF
-from PySide6.QtGui import QColor, QLinearGradient, QMouseEvent, QPainter, QPen
+from PySide6.QtGui import (
+    QColor, QLinearGradient, QMouseEvent, QPainter, QPainterPath, QPen, QPixmap,
+    QRegion,
+)
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget,
 )
@@ -38,6 +44,26 @@ QPushButton#floatGhost { border: 0; background: transparent; padding: 2px 6px; }
 COLLAPSED = 68
 EXPANDED_W, EXPANDED_H = 400, 560
 
+_logo_cache = None
+
+
+def _asset_dir() -> Path:
+    """Bundled assets dir in both the source tree and the PyInstaller build."""
+    if getattr(sys, "frozen", False) and getattr(sys, "_MEIPASS", None):
+        return Path(sys._MEIPASS) / "assets"
+    return Path(__file__).resolve().parent.parent / "assets"
+
+
+def _ball_logo() -> QPixmap | None:
+    """0.5.21 green speech-bubble/heart logo used by the circular ball."""
+    global _logo_cache
+    if _logo_cache is None:
+        path = _asset_dir() / "ChatAssistant.png"
+        pixmap = QPixmap(str(path))
+        _logo_cache = pixmap if not pixmap.isNull() else False
+    return _logo_cache or None
+
+
 
 class BallFace(QWidget):
     """Circular gradient face with an affection arc and score."""
@@ -57,52 +83,61 @@ class BallFace(QWidget):
     def paintEvent(self, event):  # noqa: N802 - Qt API
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        rect = QRectF(3, 3, self.width() - 6, self.height() - 6)
-        gradient = QLinearGradient(rect.topLeft(), rect.bottomRight())
-        gradient.setColorAt(0.0, QColor("#1B806B"))
-        gradient.setColorAt(1.0, QColor("#0B3A32"))
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(gradient)
-        painter.drawEllipse(rect)
+        side = min(self.width(), self.height())
+        rect = QRectF(0, 0, side, side)
+        clip = QPainterPath()
+        clip.addEllipse(rect)
+        painter.setClipPath(clip)
+        painter.fillRect(rect, QColor("#123F37"))
 
-        # progress ring around the cream core
-        arc = QRectF(rect.left() + 5, rect.top() + 5,
-                     rect.width() - 10, rect.height() - 10)
-        track_pen = QPen(QColor(255, 255, 255, 48), 4)
-        track_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        painter.setPen(track_pen)
-        painter.drawArc(arc, 90 * 16, -360 * 16)
+        logo = _ball_logo()
+        if logo is not None:
+            scaled = logo.scaled(
+                int(round(side)), int(round(side)),
+                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                Qt.TransformationMode.SmoothTransformation)
+            source = QRectF((scaled.width() - side) / 2.0,
+                            (scaled.height() - side) / 2.0, side, side)
+            painter.drawPixmap(rect, scaled, source)
+        else:
+            gradient = QLinearGradient(rect.topLeft(), rect.bottomRight())
+            gradient.setColorAt(0.0, QColor("#1B806B"))
+            gradient.setColorAt(1.0, QColor("#0B3A32"))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(gradient)
+            painter.drawEllipse(rect)
+            painter.setPen(QColor("#F7F5EE"))
+            font = painter.font()
+            font.setPointSizeF(15)
+            font.setBold(True)
+            painter.setFont(font)
+            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "AI")
+
+        # Affection score remains available as a thin outer arc around the logo.
         if self._score is not None:
-            progress_pen = QPen(QColor("#9BE7C9"), 4)
-            progress_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-            painter.setPen(progress_pen)
+            painter.setClipping(False)
+            arc = QRectF(2.0, 2.0, side - 4.0, side - 4.0)
+            track = QPen(QColor(247, 245, 238, 90), 3)
+            track.setCapStyle(Qt.PenCapStyle.RoundCap)
+            painter.setPen(track)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawArc(arc, 90 * 16, -360 * 16)
+            progress = QPen(QColor("#9BE7C9"), 3)
+            progress.setCapStyle(Qt.PenCapStyle.RoundCap)
+            painter.setPen(progress)
             span = max(0, min(100, int(self._score))) * 360 / 100
             painter.drawArc(arc, 90 * 16, -int(span * 16))
 
-        # soft cream core with a thin highlight rim, like a floating capsule
-        core = rect.adjusted(10, 10, -10, -10)
-        painter.setPen(QPen(QColor(255, 255, 255, 120), 1.2))
-        painter.setBrush(QColor("#F7F5EE"))
-        painter.drawEllipse(core)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(23, 107, 91, 18))
-        painter.drawEllipse(QRectF(core.left() + 6, core.top() + 7,
-                                   core.width() - 12, core.height() * 0.42))
-
-        painter.setPen(QColor("#176B5B"))
-        font = painter.font()
-        font.setPointSizeF(16 if self._score is None else 17)
-        font.setBold(True)
-        painter.setFont(font)
-        text = "AI" if self._score is None else str(int(self._score))
-        painter.drawText(core, Qt.AlignmentFlag.AlignCenter, text)
         if self._favorite:
-            badge = QRectF(rect.right() - 24, rect.bottom() - 24, 20, 20)
+            painter.setClipping(True)
+            badge_side = side * 0.30
+            badge = QRectF(side - badge_side - 3, side - badge_side - 3,
+                           badge_side, badge_side)
             painter.setPen(QPen(QColor("#F7F5EE"), 2))
             painter.setBrush(QColor("#9BE7C9"))
             painter.drawEllipse(badge)
             heart_font = painter.font()
-            heart_font.setPointSizeF(8)
+            heart_font.setPointSizeF(max(7.0, side * 0.13))
             painter.setFont(heart_font)
             painter.setPen(QColor("#0F483D"))
             painter.drawText(badge, Qt.AlignmentFlag.AlignCenter, "♥")
@@ -121,9 +156,14 @@ class FloatingAssistant(QWidget):
         self._expanded = False
         self.setWindowTitle("ChatAssistant · 悬浮球")
         self.setObjectName("floatRoot")
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        # Round ball: transparent, unmasked corners would still render as a square
+        # tool window on Windows, so clip the top-level window to the circle.
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
         self.setStyleSheet(BALL_STYLE)
         self.setFixedSize(COLLAPSED, COLLAPSED)
+        self._apply_ball_mask()
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -245,6 +285,11 @@ class FloatingAssistant(QWidget):
         self.refresh()
 
     # -- state --------------------------------------------------------------
+    def _apply_ball_mask(self):
+        """Clip the collapsed window to a circle (no square tool-window box)."""
+        self.setMask(QRegion(0, 0, COLLAPSED, COLLAPSED,
+                             QRegion.RegionType.Ellipse))
+
     def refresh(self):
         host = self.host
         if host is None:
@@ -324,6 +369,7 @@ class FloatingAssistant(QWidget):
 
     def _fit_expanded(self):
         self.setFixedSize(EXPANDED_W, EXPANDED_H)
+        self.clearMask()
         self._place_near_current_position()
 
     def _place_near_current_position(self):
@@ -352,6 +398,7 @@ class FloatingAssistant(QWidget):
         self.panel.setVisible(False)
         self.ball.setVisible(True)
         self.setFixedSize(COLLAPSED, COLLAPSED)
+        self._apply_ball_mask()
 
     def toggle(self):
         self.collapse() if self._expanded else self.expand()

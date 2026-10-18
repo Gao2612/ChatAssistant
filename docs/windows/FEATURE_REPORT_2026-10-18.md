@@ -1,6 +1,6 @@
 # ChatAssistant Lite 0.5.21 功能报告与实测包
 
-- 生成时间：2026-10-18 21:28（Asia/Shanghai；21:26 重建新 logo 版）
+- 生成时间：2026-10-18 21:41（Asia/Shanghai；21:38 重建圆形悬浮球/微信自动定位版）
 - 生成方：DeepSeek Harness（初版），Codex（实机验收与安装包更新）
 - 触发原因：用户 #93/#96 要求额度接近上限时整理现状并提供可实测安装包。
 - 代码基线：`feat/windows-lite`；备份提交 `c02ac4b`，最新文档提交 `d577ca8`。功能分支已推送到 GitHub；安装包由 0.5.21 应用代码构建，manifest `dirty=true`（source digest 已验证）。
@@ -10,7 +10,7 @@
 
 | 交付物 | 路径 | 说明 |
 | --- | --- | --- |
-| 最新安装包 | `G:\codex\ChatAssistant\windows\lite\dist-release\ChatAssistantLite-Setup.exe` | **102,860,363 字节**，SHA256 `F5D668A4A420FBB778AEDA2C58EC79773495DF131B509440AF6C365FB42B0B90`（21:26 重建，含新 logo 图标） |
+| 最新安装包 | `G:\codex\ChatAssistant\windows\lite\dist-release\ChatAssistantLite-Setup.exe` | **102,881,307 字节**，SHA256 `E485F1FFEC4000DDBEF223797B88D11D40AFEB25FA8CE01E1906ED1DB2458E6C`（21:38 重建，圆形新 logo 悬浮球 + 微信自动定位） |
 | 打包验证 | `windows/lite/package.ps1` | PyInstaller + Inno Setup 编译成功；便携 `--smoke` 成功；`verify_build_info.py` 返回 `ok=true` |
 | 隔离安装生命周期 | `windows/lite/tools/verify_install.ps1` | 本轮新包 `install_exit=0`、`self_test_exit=0`、`uninstall_exit=0`、`files_removed=true`、`ok=true`；安装目录位于临时目录，未覆盖用户安装 |
 | 全量测试 | `windows/lite/test-output/c1/reopen-20261018-final-full-after-driver.log` | 909 项通过 / 42 项跳过（Codex #78/#81） |

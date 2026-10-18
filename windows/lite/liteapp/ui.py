@@ -297,9 +297,13 @@ class SettingsPage(QWidget):
         self.path = QLineEdit(config.get("wechat_path", ""))
         browse = QPushButton("选择文件")
         browse.clicked.connect(self.browse)
+        auto_detect = QPushButton("自动检测")
+        auto_detect.setToolTip("自动查找已安装/正在运行的官方微信，无需手动选择")
+        auto_detect.clicked.connect(self.auto_detect_path)
         path_row = QHBoxLayout()
         path_row.addWidget(self.path, 1)
         path_row.addWidget(browse)
+        path_row.addWidget(auto_detect)
         path_form.addRow("微信程序路径", path_row)
         self.windows = NoWheelComboBox()
         path_form.addRow("微信窗口", self.windows)
@@ -534,6 +538,19 @@ class SettingsPage(QWidget):
         file, _ = QFileDialog.getOpenFileName(self, "选择官方微信", self.path.text(), "程序 (*.exe)")
         if file:
             self.path.setText(file)
+
+    def auto_detect_path(self):
+        """Fill the path field with the existing installed/running WeChat."""
+        try:
+            from .wechat_locator import detect_wechat_path
+            found = detect_wechat_path()
+        except (ImportError, OSError, ValueError):
+            found = None
+        if found:
+            self.path.setText(found)
+            self.path.setToolTip("已自动检测到微信程序")
+        else:
+            self.path.setToolTip("未检测到已安装的微信，请手动选择 Weixin.exe / WeChat.exe")
 
     def reading_changed(self):
         backend = self.reading_backend.currentData()
@@ -1109,6 +1126,9 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(900, 500)
         self.setStyleSheet(STYLE)
         self.config = config if config is not None else settings.load()
+        # Locate the existing official WeChat client automatically: users should not
+        # have to browse for Weixin.exe (4.x) / WeChat.exe (older builds) themselves.
+        self._auto_detect_wechat_path()
         self._account_store = account_store
         self.account_busy = False
         self._style_profile = None
@@ -3824,8 +3844,27 @@ class MainWindow(QMainWindow):
             self.clear_results()
             self.set_notice("对话已变化，旧回复不能复制。等待自动分析新内容。")
 
+    def _auto_detect_wechat_path(self):
+        """Keep a usable WeChat path without forcing the user to browse for it."""
+        try:
+            from .wechat_locator import ensure_wechat_path
+            ensure_wechat_path(self.config, save=False)
+        except (ImportError, OSError, ValueError):
+            return
+
     def launch_wechat(self):
-        path = self.settings_page.path.text().strip().strip('"') or self.config["wechat_path"].strip().strip('"')
+        path = self.settings_page.path.text().strip().strip('"')
+        if not path:
+            path = str(self.config.get("wechat_path", "")).strip().strip('"')
+        if not path:
+            try:
+                from .wechat_locator import detect_wechat_path
+                path = detect_wechat_path() or ""
+            except (ImportError, OSError, ValueError):
+                path = ""
+            if path:
+                self.config["wechat_path"] = path
+                self.settings_page.path.setText(path)
         if not Path(path).is_file() or Path(path).suffix.lower() != ".exe":
             self.notice.setText("微信路径无效，请在设置中选择官方微信程序。")
             return
