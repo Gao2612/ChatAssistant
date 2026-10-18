@@ -1,4 +1,4 @@
-# C4 自动找对话 OCR 名字误识改进（郜亚禹类）— 交接证据
+# C4 自动找对话 OCR 名字误识改进（郜亚禹类）— 交接证据（preflight: visible；应用版本 = 0.5.8 source tree，基线 a3b2994 + C4 改动）
 
 第一行记录本轮证据前置条件：`preflight: visible`；应用版本 = **0.5.8 source tree（基线 a3b2994 + C4 未提交改动）**；真实窗口 hwnd=394618（Weixin.exe），DPI=120（125%）。安装版 0.5.7 **不**作为本轮证据。
 
@@ -71,7 +71,7 @@
 | 模块 docstring | 记录硬安全规则：仅 exact 结果行、double-row fail-closed、无 Enter、屏幕抓取仅内存。 |
 | 保留 | 结果点击后**不按 Enter** 的注释与行为（Codex 0.5.8 删除项，禁止回退）。 |
 
-### 3.2 `windows/lite/tests/test_wechat_find.py`（12 项，全部通过）
+### 3.2 `windows/lite/tests/test_wechat_find.py`（13 项，全部通过）
 
 新增安全回归：
 - `test_no_enter_is_pressed_after_the_result_click`：断言全程 `key_combo` 无 `VK_RETURN`(0x0D)、steps 无 `press_enter`；
@@ -84,16 +84,29 @@
 
 保留原有 4 项（成功、搜索框缺失、标题不匹配 ESC、空标题）。
 
+### 3.3 Lead 终审加强的安全守卫（不改语义，只加前置条件；由 Lead 落盘）
+
+Lead 在 `wechat_find.py` 上追加：
+- `_foreground_ok(hwnd)`：要求 `discovery.window_status(hwnd) == "visible"` **且** `GetForegroundWindow() == hwnd`，否则 False；
+- `capture_client_bgr()` 抓屏前先 `_foreground_ok`，不满足返回 None（finder 走 fail-closed，不去读/点别的窗口画面）；
+- `find_conversation()` 里：搜索框点击前、点击后/键入前、结果行点击前各再校验一次，不满足直接 `fail("not_foreground")` 并 ESC fail-closed；
+- 新增 `windows/lite/tests/test_wechat_find_foreground.py` 3 项：capture 拒绝非前台、首次点击前拒绝、结果点击前竞态拒绝，均 OK。
+- 原 12 项 find 单测（fake hwnd）在该守卫下需要夹具放行 `_foreground_ok`：已在 `tests/test_wechat_find.py` `setUp` 中 patch，并补 1 条“非前台 → `not_foreground`、0 点击、无 ESC”自测（**只改测试，产品码未动**）。
+
 ## 4. 命令与测试结果
 
 ```
 cd G:\codex\ChatAssistant\windows\lite
 G:\codex\wechat-lite-venv\Scripts\python.exe -m unittest tests.test_wechat_find -q
-Ran 12 tests in 12.322s
+Ran 13 tests in 12.4s
+OK
+
+G:\codex\wechat-lite-venv\Scripts\python.exe -m unittest tests.test_wechat_find tests.test_wechat_find_foreground -q
+Ran 16 tests in 12.4s
 OK
 ```
 
-（`-v` 全量 12 项明细日志：`C:\Users\16356\AppData\Local\Temp\c4_unit_v.log`；本报告不粘贴真实聊天内容。）
+（`-v` 明细：`C:\Users\16356\AppData\Local\Temp\c4_final_unit_v.log`；本报告不粘贴真实聊天内容。）
 未跑全量 discover（按接管约定由 Lead 统一跑）。
 
 真实窗口验证脚本（只读/只查找、无发送、不落盘截图）：
@@ -113,7 +126,7 @@ OK
 
 ## 6. 风险与未完成
 
-1. **屏幕抓取依赖“前台 + 无遮挡”**：必须 `activate` 后抓当前屏幕矩形；若微信被其它窗口遮挡（含本 App 置顶），OCR 会读到遮挡内容 → 只会 fail-closed（结果行/头部不匹配），不会切错人；但会降低成功率。Lead 正在加的“抓屏/点击前 `window_status==visible` 且 `GetForegroundWindow==hwnd`，否则 `not_foreground`”守卫正好覆盖该风险。
+1. **屏幕抓取依赖“前台 + 无遮挡”**：必须 `activate` 后抓当前屏幕矩形；若微信被其它窗口遮挡（含本 App 置顶），OCR 会读到遮挡内容 → 只会 fail-closed（结果行/头部不匹配），不会切错人；但会降低成功率。**Lead 终审已加守卫**：抓屏/点击前要求 `window_status==visible` 且 `GetForegroundWindow()==hwnd`，否则 `not_foreground` fail-closed（见 §3.3）。
 2. **ESC 语义**：实测个别状态下（会话已打开、焦点在消息区）按 ESC 会让微信主窗变为 `hidden`（矩形不变），已恢复 visible。失败路径的 `_escape` 属既有安全动作；若 ESC 后窗口 hidden，后续操作应直接 fail-closed，不应再抓屏。
 3. **单字误识并未被“放行”**：本修复不依赖模糊匹配；若某些字体/DPI/主题下头部仍单字误读，结果保持 `title_mismatch` fail-closed（符合“宁可不切，不可切错”）。是否引入“受控容错”需另行证明唯一性（本轮不采纳；`test_single_character_difference_is_never_accepted` 固化）。
 4. **安装版未重打包**：本轮验证是 0.5.8 source tree（a3b2994 + 当前工作区改动），未重建/重装候选包；Codex 复核/打包由 Lead 统一处理。
@@ -125,6 +138,6 @@ OK
 
 - [ ] `wechat_find.py`：确认无任何 Enter（0x0D）路径；`result_ambiguous` 时不点结果；exact 行条件未被放宽。
 - [ ] `wechat_find.py`：Lead 的 visible/foreground 守卫与 `capture_client_bgr`/`click` 的调用顺序一致。
-- [ ] 单测：`tests.test_wechat_find` 12 项（含 7 项 C4 安全回归）。
+- [ ] 单测：`tests.test_wechat_find` 13 项 + `tests.test_wechat_find_foreground` 3 项（含“不按 Enter”“消息预览行不点”“仅预览行 fail-closed”“重复同名 fail-closed”“单字差异绝不接受”“非前台 fail-closed”回归）。
 - [ ] 真实窗口复跑（需要 visible 窗口且前台）：`郜亚禹`/`田子夜` 各一次 ok + 头部 exact；失败变体（`鄢子夜` 类）保持 `title_mismatch`。
 - [ ] 不发送、不落盘、不 commit/push。

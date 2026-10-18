@@ -24,7 +24,7 @@
 | O1 | 实时聊天标题识别 | `liteapp/worker.py: run() → read_title(header)`；`vendor/ocr.py: read_title` | 必需 | 当前帧 header 区域 | 单字误识（“郜亚禹”→“部亚禹”）；空帧/标题空 → 不发 snapshot；隐藏窗口无 DWM 表面 |
 | O2 | 实时消息列表/发言人/方向 | `worker.py → Reader.read(chat, bg)`；`vendor/ocr.py: Reader.read/who_said/similar`；`vendor/area.py: chat_area` | 必需（文本）；方向部分靠像素颜色 | 聊天区 RGB | 同一段像素 OCR 会抖（“傻逼了”↔“傻逼”）；小字/表情/图片字需过滤；名字行漏识别会挂到上一个人 |
 | O3 | 聊天区检测 | `vendor/area.py: chat_area`（像素/背景/边距启发式，非 OCR） | 无 OCR，但依赖视觉 | 整帧 | 布局/主题/DPI 变化会误判；标题区与消息区边界错位 |
-| O4 | 自动找对话：搜索框/结果行/标题校验 | `liteapp/wechat_actions.py: make_ocr_verifier/_read_title_via_ocr/select_conversation`；`test-output/find_contact*.py` | 必需 | 窗口帧 + 固定/比例 rect | 标题容错（2/3 字符）仍需人工兜底；搜索结果可能不是首条；OCR 空帧导致 `title_unverified` |
+| O4 | 自动找对话：搜索框/结果行/标题校验 | `liteapp/wechat_find.py: find_conversation`；`wechat_actions.py: make_ocr_verifier/_read_title_via_ocr/select_conversation`；`test-output/find_contact*.py` | 必需 | 前台可见窗口屏幕抓取（结果下拉层）+ WGC/头部 | C4 实测：结果下拉层不在 WGC 帧内；已改为“精确结果行 + 头部三路 exact + 不按 Enter + 前台守卫”（见 §10）；`郜亚禹`/`田子夜` 真实窗口 ok=true；单字差异仍 fail-closed |
 | O5 | 自动发送：输入框/发送按钮/发送后验证 | `wechat_actions.py: send_message`（可选 `verify_sent`）；验收脚本 `test-output/send_final.py` 等 | 必需（定位与验证） | 窗口帧 | 输入焦点不稳定 → 文字未进输入框；仅 OCR“下方区域含文字”会误判输入框为已发送；必须“输入框清空+气泡出现”双条件 |
 | O6 | 托盘/最小化隐藏读取 | `liteapp/tray_capture.py` + `worker.py` 隐藏分支 | 必需（解析） | PrintWindow 图像 | 直接 PrintWindow 隐藏窗口黑屏；离屏非激活显示后可用；仍靠 OCR 解析标题/消息 |
 | O7 | 远程读取变更检测/回退 | `worker.py`（remote_reading 时 snapshot 是触发条件）、`liteapp/ui.py: last_ocr_snapshot` | 间接必需 | OCR snapshot 结果 | OCR 抖动导致重复触发/漏触发；远程文本不能被 OCR 覆盖（已有保护） |
@@ -193,3 +193,33 @@
 - 同 9.2 的“临时恢复→操作→恢复托盘”包装；发送仍需：标题校验（fail-closed）→输入框焦点探针→粘贴→点击发送→双条件验证（输入框清空+气泡出现）。
 - 未实测原因：需要再向真实联系人发送一条测试消息，需用户明确同意；dry-run（只填不发）可先行验证。
 - 建议产品化：仅用户显式点击“在托盘中执行”时启用；操作期间显示状态；结束恢复原隐藏/可见状态；绝不在未验证标题时发送。
+
+> **更正（2026-10-18 C4 实测）**：9.2 中“点击+Enter”已不可用——结果行点击后**禁止再按 Enter**（焦点可能回到已有草稿，Enter 会直接发送）。当前实现（`wechat_find.py`）点击结果后只做头部校验，不按 Enter；需要点击结果后就能切换的构建，否则 fail-closed。
+
+---
+
+## 10. 实测补充：C4 自动找对话 OCR 名字误识（2026-10-18，DeepSeek 临时接管）
+
+> 证据详情：`docs/windows/CODEX_TAKEOVER_C4_OCR.md`。前置：`preflight: visible`，0.5.8 source tree（a3b2994 + C4 改动）；真实窗口 hwnd=394618，DPI=120。全程未发送、未保存截图/正文。
+
+### 10.1 关键发现：搜索结果下拉层不在 WGC 主窗口帧内
+
+- 微信 4.x 把搜索结果下拉层渲染为主窗口之外的独立分层/弹出表面：**WGC 抓主 HWND 的帧里没有结果行**（同一时刻用屏幕抓取同矩形则能看到“郜亚禹”精确结果行、`包含：…` 消息预览行、`Q…` 网络搜索行、以及输入框内文字）。
+- 由此两个旧失败模式都得到解释：
+  1) 结果行永远不可见 → `result_not_found`（真实窗口实测 83.9s 失败一次，未切换）；
+  2) WGC 帧里仍能看到**旧会话列表行**，旧代码用“子串包含标题”选第一行，可能点到 `包含：田子夜` 这类消息预览行 → 打开错误会话；该风险此前只靠头部 exact 校验救回（`title_mismatch`，fail-closed 但存在误切换路径）。
+- 结论：自动找对话的“结果行定位”必须用**能看到下拉层的采集方式**（前台窗口屏幕抓取，仅内存），并只点“文本精确等于目标”的结果行。
+
+### 10.2 当前实现的安全规则（已落盘 + 单测）
+
+- 结果行：`_title_matches` 归一化后**精确相等**才可作为点击目标；搜索输入行（y<10%窗高）、消息预览行（`包含：…`）、网络结果（`Q…`）都不会被点击；同名重复 → `result_ambiguous` fail-closed。
+- 头部校验：band + 第二裁剪（x 0.24–0.62w, y 0.02–0.11h）1x/2x + `read_title` 三路 **exact**；单字差异（郜→部/鄢 等）**不接受**，保持 `title_mismatch` fail-closed；不引入模糊/受控容错放行。
+- 结果点击后**绝不按 Enter**（防焦点回草稿误发）；失败 ESC 退出，不发送。
+- Lead 终审追加：抓屏/点击前必须 `window_status==visible` 且 `GetForegroundWindow()==hwnd`，否则 `not_foreground` fail-closed（防抓/点其它窗口）。
+- 真实窗口结果（visible 前台）：`郜亚禹` **ok=true**（22.5s）、`田子夜` **ok=true**（13.1s），切换后头部 OCR 均精确；最终窗口保持 visible、矩形不变。
+- 单测：`tests.test_wechat_find` 13 项 + `tests.test_wechat_find_foreground` 3 项 = 16 项 OK（含 7 项 C4 安全回归 + 3 项前台守卫）。
+
+### 10.3 对 O4/替代方案结论的影响
+
+- O4（自动找对话的搜索框/结果行/标题校验）仍是 OCR 依赖；但“**结果行精确文本 + 头部 exact 二次证据**”已足以在不放宽身份校验的前提下完成切换，无需 UIA/非 OCR 信号（WeChat 4.x UIA 树仍不可用，见 9.1；窗口标题恒为“微信”，非 OCR 会话确认信号不可行）。
+- 剩余风险：屏幕抓取要求前台且无遮挡（遮挡 → OCR 读到遮挡内容 → 只会 fail-closed）；ESC 在个别状态可能让微信主窗变为 hidden（已实测并恢复，失败路径应视为终态、不再继续操作）。
