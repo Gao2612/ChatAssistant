@@ -5,6 +5,7 @@ import queue
 import subprocess
 import threading
 import time
+import unicodedata
 import uuid
 import webbrowser
 
@@ -996,7 +997,7 @@ class MainWindow(QMainWindow):
     def __init__(self, config=None, scanning=True, window_manager=None, account_store=None,
                  inference_queue=None):
         super().__init__()
-        self.setWindowTitle("微信实时助手 · 便捷版 0.5.13")
+        self.setWindowTitle("微信实时助手 · 便捷版 0.5.14")
         self.resize(1000, 520)
         self.setMinimumSize(900, 500)
         self.setStyleSheet(STYLE)
@@ -2026,8 +2027,14 @@ class MainWindow(QMainWindow):
             self.clear_results()
             self.user_paused = True
             self.set_connection_status("采集进程已停止，请在设置中重新连接。")
+        favorites = self.config.get("favorite_contacts") or []
+        # Backward compatible: before the user fixes any contact, every contact may
+        # auto-analyse as before. Once at least one is fixed, only fixed contacts do.
+        favorite = (not favorites) or self.is_favorite_contact(self.state.title)
         if self.auto_analysis.isChecked() and self.state.ready:
-            if self.remote_reading and not self.reading_snapshot_ready() and self.reading_busy:
+            if not favorite:
+                self.analysis_status.setText("非固定联系人：点“分析当前对话”确认")
+            elif self.remote_reading and not self.reading_snapshot_ready() and self.reading_busy:
                 self.analysis_status.setText("正在用所选读取后端识别画面…")
             elif self.remote_reading and not reading.reading_ready(self.config):
                 self.analysis_status.setText("等待读取后端")
@@ -2035,7 +2042,8 @@ class MainWindow(QMainWindow):
             elif not self.backend_ready():
                 self.analysis_status.setText("等待模型连接")
                 self.set_notice("已读取聊天文字；模型尚未就绪，请在设置中连接并选择分析模型。")
-        if (self.auto_analysis.isChecked() and self.backend_ready() and self.reading_snapshot_ready()
+        if (favorite and self.auto_analysis.isChecked()
+                and self.backend_ready() and self.reading_snapshot_ready()
                 and self.child and self.state.ready and not self.busy
                 and self.last_auto_token != self.state.token and time.monotonic() - self.changed_at > 2
                 and time.monotonic() - self.last_analysis > 10):
@@ -2247,6 +2255,85 @@ class MainWindow(QMainWindow):
         lines.append("\n以上内容来自已导入的本地历史，只帮助措辞与上下文；不是当前事实。")
         QMessageBox.information(self, f"参考历史（{len(context.items)} 条）",
                                 "\n\n".join(lines))
+
+    # ---- favorite contacts / per-contact memory -----------------------------
+    @staticmethod
+    def _contact_key(title):
+        text = unicodedata.normalize("NFKC", str(title or "")).strip().casefold()
+        return "".join(text.split())
+
+    def current_contact_title(self):
+        return str(getattr(self.state, "title", "") or self.chat_title.text()).strip()
+
+    def is_favorite_contact(self, title=None):
+        key = self._contact_key(title if title is not None else self.current_contact_title())
+        if not key:
+            return False
+        favorites = self.config.get("favorite_contacts") or []
+        return any(self._contact_key(item) == key for item in favorites)
+
+    def toggle_favorite_contact(self):
+        title = self.current_contact_title()
+        if not title:
+            self.set_notice("尚未确认当前会话，无法固定联系人。")
+            return False
+        key = self._contact_key(title)
+        favorites = [item for item in (self.config.get("favorite_contacts") or [])
+                     if self._contact_key(item) != key]
+        if self.is_favorite_contact(title):
+            self.config["favorite_contacts"] = favorites
+            self.set_notice(f"已取消固定联系人：{title}；该联系人将不再自动分析。")
+            active = False
+        else:
+            favorites.append(title)
+            self.config["favorite_contacts"] = favorites
+            self.set_notice(f"已固定联系人：{title}；只有固定联系人会自动分析。")
+            active = True
+        try:
+            settings.save(self.config)
+        except (OSError, ValueError, TypeError):
+            self.set_notice("固定状态未能保存；请检查用户目录权限。")
+        floating = getattr(self, "floating", None)
+        if floating is not None:
+            floating.refresh()
+        return active
+
+    def affection_for_current(self):
+        """Local, explainable affection estimate from the recent conversation."""
+        messages = list(getattr(self, "_recent_messages", []) or [])
+        if not messages:
+            state_messages = getattr(self.state, "messages", None)
+            if state_messages:
+                messages = list(state_messages)
+        if not messages:
+            return None
+        title = self.current_contact_title()
+        last = messages[-1][2] if len(messages[-1]) > 2 else ""
+        key = (title, len(messages), str(last)[:120])
+        cache = getattr(self, "_affection_cache", None)
+        if cache is not None and cache[0] == key:
+            return cache[1]
+        try:
+            from .affection import estimate_affection
+            profile = estimate_affection(messages)
+        except Exception:  # noqa: BLE001 - heuristic must never break the UI
+            profile = None
+        self._affection_cache = (key, profile)
+        return profile
+
+    def contact_profile_for_current(self):
+        title = self.current_contact_title()
+        if not title:
+            return None
+        try:
+            from .contact_profile import ContactProfileStore
+            store = getattr(self, "_contact_profiles", None)
+            if store is None:
+                store = ContactProfileStore(settings.data_dir())
+                self._contact_profiles = store
+            return store.get(title)
+        except Exception:  # noqa: BLE001 - profile storage is best-effort
+            return None
 
     # ---- T9: conversation binding + local memory retrieval ------------------
     def _current_source(self):
@@ -2753,11 +2840,49 @@ class MainWindow(QMainWindow):
             self.settings_page.style_profile_status.setText(error or "生成失败，请重试。")
             return
         self._style_profile = profile
+        self._save_contact_profile(profile)
         self.settings_page.style_profile_status.setText(
             f"已生成：样本 {getattr(profile, 'sample_count', 0)} 条、"
             f"来源 {getattr(profile, 'sources_with_me', 0)} 个。"
             "可查看报告并选用。")
         self._show_style_profile_dialog(profile)
+
+    def _save_contact_profile(self, style_profile):
+        """Persist the generated style/report as a per-contact encrypted profile."""
+        scope = None
+        try:
+            scope = self.history_page.current_scope()
+        except (RuntimeError, AttributeError):
+            scope = None
+        title = ""
+        if scope is not None:
+            try:
+                people = self.history_page.store.list_people(
+                    self.history_page.account.text().strip() or "default")
+                title = next((person.display_name for person in people
+                              if person.scope == scope), "")
+            except Exception:  # noqa: BLE001 - optional history linkage
+                title = ""
+        title = title or self.current_contact_title()
+        if not title:
+            return
+        try:
+            from .contact_profile import ContactProfileStore, profile_from_style
+            store = getattr(self, "_contact_profiles", None)
+            if store is None:
+                store = ContactProfileStore(settings.data_dir())
+                self._contact_profiles = store
+            existing = store.get(title)
+            affection = self.affection_for_current()
+            profile = profile_from_style(
+                title, style_profile, scope=scope,
+                persona=(existing.persona if existing is not None else ""),
+                affection=(affection.score if affection is not None
+                           else (existing.affection_score if existing is not None else None)))
+            profile.favorite = self.is_favorite_contact(title)
+            store.save(profile)
+        except Exception:  # noqa: BLE001 - profile save must not break style flow
+            return
 
     def _show_style_profile_dialog(self, profile):
         dialog = StyleProfileDialog(profile, self)

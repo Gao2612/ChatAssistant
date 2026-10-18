@@ -25,6 +25,9 @@ DEFAULTS = {
     # Ball-first UI: the main window keeps settings/history only; the floating
     # ball owns status, analysis and suggestions.
     "floating_ball": False,
+    # Only these conversation titles are auto-analysed; other contacts require
+    # pressing the analysis button.
+    "favorite_contacts": [],
     # Reading backends: ocr (local, offline), api (multimodal vision API),
     # codex (official app-server image input). Reading and analysis are independent.
     "reading_backend": "ocr", "reading_base_url": "", "reading_model": "",

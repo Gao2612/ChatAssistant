@@ -1,29 +1,25 @@
-"""Floating assistant ball.
+"""Floating assistant ball with per-contact affection.
 
 The ball is the primary compact interface: a draggable always-on-top circular
-button that expands into a panel with live status, the AI suggestions and the
-analysis action. The main window is only used for settings/history once the ball
-mode is active.
+button showing the current contact's affection score. Expanding it reveals live
+status, a per-contact profile summary, the AI suggestions and actions. The main
+window keeps settings/history only.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QMouseEvent
+from PySide6.QtCore import Qt, QTimer, QRectF
+from PySide6.QtGui import QColor, QLinearGradient, QMouseEvent, QPainter, QPen
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget,
 )
 
 BALL_STYLE = """
-QWidget#floatRoot { background: transparent; }
-QFrame#ballFrame {
-    background: #176B5B; border: 2px solid #0F483D; border-radius: 29px;
-}
-QLabel#ballText { color: #FFFFFF; font-size: 15px; font-weight: 700; }
 QFrame#floatPanel {
-    background: #F7F5EE; border: 1px solid #D5D0C4; border-radius: 12px;
+    background: #F7F5EE; border: 1px solid #D5D0C4; border-radius: 14px;
 }
 QLabel#floatTitle { color: #1F2421; font-size: 15px; font-weight: 600; }
-QLabel#floatName { color: #176B5B; font-size: 14px; font-weight: 600; }
+QLabel#floatName { color: #176B5B; font-size: 15px; font-weight: 700; }
+QLabel#floatScore { color: #176B5B; font-size: 22px; font-weight: 800; }
 QLabel#floatMuted { color: #6B746E; font-size: 12px; }
 QLabel#floatReply { color: #1F2421; font-size: 12px; }
 QPushButton {
@@ -35,15 +31,70 @@ QPushButton#floatPrimary {
     background: #176B5B; border-color: #176B5B; color: #FFFFFF; font-weight: 600;
 }
 QPushButton#floatPrimary:disabled { background: #A9C4BA; border-color: #A9C4BA; }
+QPushButton#floatFavorite { border-color: #B6D6C9; color: #176B5B; }
 QPushButton#floatGhost { border: 0; background: transparent; padding: 2px 6px; }
 """
 
-COLLAPSED = 62
-EXPANDED_W, EXPANDED_H = 390, 500
+COLLAPSED = 68
+EXPANDED_W, EXPANDED_H = 400, 560
+
+
+class BallFace(QWidget):
+    """Circular gradient face with an affection arc and score."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(COLLAPSED, COLLAPSED)
+        self._score = None
+        self._favorite = False
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def set_state(self, score=None, favorite=False):
+        self._score = score
+        self._favorite = favorite
+        self.update()
+
+    def paintEvent(self, event):  # noqa: N802 - Qt API
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        rect = QRectF(4, 4, self.width() - 8, self.height() - 8)
+        gradient = QLinearGradient(rect.topLeft(), rect.bottomRight())
+        gradient.setColorAt(0.0, QColor("#1B806B"))
+        gradient.setColorAt(1.0, QColor("#0F483D"))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(gradient)
+        painter.drawEllipse(rect)
+
+        track_pen = QPen(QColor(255, 255, 255, 55), 4)
+        track_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(track_pen)
+        arc = QRectF(rect.left() + 5, rect.top() + 5, rect.width() - 10, rect.height() - 10)
+        painter.drawArc(arc, 90 * 16, -360 * 16)
+        if self._score is not None:
+            progress_pen = QPen(QColor("#9BE7C9"), 4)
+            progress_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            painter.setPen(progress_pen)
+            span = max(0, min(100, int(self._score))) * 360 / 100
+            painter.drawArc(arc, 90 * 16, -int(span * 16))
+
+        painter.setPen(QColor("#FFFFFF"))
+        font = painter.font()
+        font.setPointSizeF(15 if self._score is None else 13)
+        font.setBold(True)
+        painter.setFont(font)
+        text = "AI" if self._score is None else str(int(self._score))
+        painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, text)
+        if self._favorite:
+            heart_font = painter.font()
+            heart_font.setPointSizeF(8)
+            painter.setFont(heart_font)
+            painter.setPen(QColor("#9BE7C9"))
+            painter.drawText(QRectF(rect.left(), rect.bottom() - 20, rect.width(), 16),
+                             Qt.AlignmentFlag.AlignCenter, "♥ 已固定")
 
 
 class FloatingAssistant(QWidget):
-    """Draggable ball that expands to the AI-suggestion panel."""
+    """Draggable ball expanding to status + affection + AI suggestions."""
 
     def __init__(self, host, parent=None):
         super().__init__(parent, Qt.WindowType.Tool
@@ -62,75 +113,79 @@ class FloatingAssistant(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
-
-        # -- collapsed ball -------------------------------------------------
-        self.ball = QFrame()
-        self.ball.setObjectName("ballFrame")
-        ball_layout = QVBoxLayout(self.ball)
-        ball_layout.setContentsMargins(4, 4, 4, 4)
-        self.ball_label = QLabel("AI")
-        self.ball_label.setObjectName("ballText")
-        self.ball_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        ball_layout.addWidget(self.ball_label)
+        self.ball = BallFace()
         root.addWidget(self.ball)
 
-        # -- expanded panel -------------------------------------------------
         self.panel = QFrame()
         self.panel.setObjectName("floatPanel")
         self.panel.setVisible(False)
-        panel_layout = QVBoxLayout(self.panel)
-        panel_layout.setContentsMargins(12, 8, 12, 10)
-        panel_layout.setSpacing(6)
+        panel = QVBoxLayout(self.panel)
+        panel.setContentsMargins(12, 8, 12, 10)
+        panel.setSpacing(6)
 
         header = QHBoxLayout()
         title = QLabel("ChatAssistant")
         title.setObjectName("floatTitle")
         header.addWidget(title, 1)
+        self.favorite_button = QPushButton("固定")
+        self.favorite_button.setObjectName("floatFavorite")
+        self.favorite_button.setToolTip("只自动分析固定联系人；其他联系人需点分析")
+        self.favorite_button.clicked.connect(self._toggle_favorite)
+        header.addWidget(self.favorite_button)
         self.collapse_button = QPushButton("−")
         self.collapse_button.setObjectName("floatGhost")
         self.collapse_button.setFixedWidth(24)
-        self.collapse_button.setToolTip("收起为悬浮球")
         self.collapse_button.clicked.connect(self.collapse)
         header.addWidget(self.collapse_button)
         self.settings_button = QPushButton("设置")
         self.settings_button.setObjectName("floatGhost")
-        self.settings_button.setToolTip("打开主界面设置/历史")
         self.settings_button.clicked.connect(self.show_main_settings)
         header.addWidget(self.settings_button)
+        self.profile_button = QPushButton("档案")
+        self.profile_button.setObjectName("floatGhost")
+        self.profile_button.setToolTip("在历史页查看/生成该联系人的专属风格与画像")
+        self.profile_button.clicked.connect(self.show_main_history)
+        header.addWidget(self.profile_button)
         self.quit_button = QPushButton("退出")
         self.quit_button.setObjectName("floatGhost")
-        self.quit_button.setToolTip("退出 ChatAssistant")
         self.quit_button.clicked.connect(self._quit)
         header.addWidget(self.quit_button)
-        panel_layout.addLayout(header)
+        panel.addLayout(header)
 
+        name_row = QHBoxLayout()
         self.name_label = QLabel("尚未连接会话")
         self.name_label.setObjectName("floatName")
-        self.name_label.setWordWrap(False)
-        panel_layout.addWidget(self.name_label)
+        name_row.addWidget(self.name_label, 1)
+        self.affection_label = QLabel("好感度 —")
+        self.affection_label.setObjectName("floatScore")
+        name_row.addWidget(self.affection_label)
+        panel.addLayout(name_row)
+
+        self.affection_detail = QLabel("等待识别到聊天后计算本地好感度")
+        self.affection_detail.setObjectName("floatMuted")
+        self.affection_detail.setWordWrap(True)
+        panel.addWidget(self.affection_detail)
+        self.profile_label = QLabel("专属档案：未生成")
+        self.profile_label.setObjectName("floatMuted")
+        self.profile_label.setWordWrap(True)
+        panel.addWidget(self.profile_label)
 
         self.status_label = QLabel("等待微信窗口")
         self.status_label.setObjectName("floatMuted")
         self.status_label.setWordWrap(True)
-        panel_layout.addWidget(self.status_label)
-
-        self.analysis_label = QLabel("等待分析")
-        self.analysis_label.setObjectName("floatMuted")
-        self.analysis_label.setWordWrap(True)
-        panel_layout.addWidget(self.analysis_label)
+        panel.addWidget(self.status_label)
 
         self.analyze_button = QPushButton("分析当前对话")
         self.analyze_button.setObjectName("floatPrimary")
-        self.analyze_button.setToolTip("对当前原生微信窗口的可见对话进行分析")
         self.analyze_button.clicked.connect(self._analyze)
-        panel_layout.addWidget(self.analyze_button)
+        panel.addWidget(self.analyze_button)
 
         self.reply_labels, self.copy_buttons, self.send_buttons = [], [], []
         for index in range(3):
             frame = QFrame()
             frame_layout = QVBoxLayout(frame)
-            frame_layout.setContentsMargins(0, 2, 0, 2)
-            frame_layout.setSpacing(3)
+            frame_layout.setContentsMargins(0, 1, 0, 1)
+            frame_layout.setSpacing(2)
             text = QLabel("等待分析")
             text.setObjectName("floatReply")
             text.setWordWrap(True)
@@ -147,20 +202,20 @@ class FloatingAssistant(QWidget):
             row.addWidget(send)
             row.addStretch(1)
             frame_layout.addLayout(row)
-            panel_layout.addWidget(frame)
+            panel.addWidget(frame)
             self.reply_labels.append(text)
             self.copy_buttons.append(copy)
             self.send_buttons.append(send)
-        panel_layout.addStretch(1)
-        self.hint_label = QLabel("只监控原生微信窗口 · 设置/历史在主界面")
-        self.hint_label.setObjectName("floatMuted")
-        self.hint_label.setWordWrap(True)
-        panel_layout.addWidget(self.hint_label)
+        panel.addStretch(1)
+        hint = QLabel("只监控原生微信窗口 · 设置/历史在主界面；好感度是本地估算，仅供参考")
+        hint.setObjectName("floatMuted")
+        hint.setWordWrap(True)
+        panel.addWidget(hint)
         root.addWidget(self.panel, 1)
 
         self._timer = QTimer(self)
         self._timer.timeout.connect(self.refresh)
-        self._timer.start(600)
+        self._timer.start(700)
         self.refresh()
 
     # -- state --------------------------------------------------------------
@@ -169,25 +224,49 @@ class FloatingAssistant(QWidget):
         if host is None:
             return
         try:
-            self.name_label.setText(host.chat_title.text() or "尚未连接会话")
+            title = host.current_contact_title() if hasattr(host, "current_contact_title") else ""
+            self.name_label.setText(title or "尚未连接会话")
             self.status_label.setText(host.connection_status.text() or "等待微信窗口")
-            self.analysis_label.setText(host.analysis_status.text() or "等待分析")
             ready = bool(getattr(getattr(host, "state", None), "ready", False))
             busy = bool(getattr(host, "busy", False))
             self.analyze_button.setEnabled(ready and not busy)
-            self.analyze_button.setToolTip(
-                "分析当前可见对话" if ready else "等待识别到可直接分析的聊天文字")
+            favorite = host.is_favorite_contact(title) if hasattr(host, "is_favorite_contact") else False
+            self.favorite_button.setText("已固定" if favorite else "固定")
+            score = None
+            detail = "等待识别到聊天后计算本地好感度"
+            if hasattr(host, "affection_for_current"):
+                profile = host.affection_for_current()
+                if profile is not None:
+                    score = int(profile.score)
+                    dims = " · ".join(
+                        f"{d.label}{int(round(d.level + 1))}/5"
+                        for d in profile.dimensions[:3])
+                    if profile.boundary_applied:
+                        detail = f"{profile.level_label} · 对方边界明确，分数封顶 25"
+                    elif profile.status == "insufficient":
+                        detail = f"{profile.level_label} · 样本不足，仅供参考"
+                    else:
+                        detail = f"{profile.level_label} · {dims} · 本地估算"
+            self.affection_label.setText(f"好感度 {score}" if score is not None else "好感度 —")
+            self.affection_detail.setText(detail)
+            profile = None
+            if hasattr(host, "contact_profile_for_current"):
+                profile = host.contact_profile_for_current()
+            if profile is not None and (profile.style_prompt or profile.display_report):
+                self.profile_label.setText("专属档案：已生成（历史页可查看风格/画像）")
+            elif profile is not None:
+                self.profile_label.setText("专属档案：已建立，等待生成风格")
+            else:
+                self.profile_label.setText("专属档案：未生成（历史页导入后生成）")
+            self.ball.set_state(score, favorite)
             for index, label in enumerate(self.reply_labels):
                 text = host.reply_boxes[index].text() if index < len(host.reply_boxes) else ""
                 label.setText(text or "等待分析")
                 self.copy_buttons[index].setEnabled(bool(text) and text != "等待分析")
-                sent_ok = (index < len(host.send_buttons)
-                           and host.send_buttons[index].isEnabled() and text
-                           and text != "等待分析")
-                self.send_buttons[index].setEnabled(bool(sent_ok))
-            server = getattr(host, "settings_page", None)
-            if server is not None:
-                self.send_buttons = self.send_buttons  # keep layout stable
+                self.send_buttons[index].setEnabled(
+                    index < len(host.send_buttons)
+                    and host.send_buttons[index].isEnabled()
+                    and bool(text) and text != "等待分析")
             if self._expanded:
                 self._fit_expanded()
         except RuntimeError:
@@ -202,10 +281,8 @@ class FloatingAssistant(QWidget):
         if screen is None:
             return
         area = screen.availableGeometry()
-        x = self.x()
-        y = self.y()
-        x = max(area.left() + 8, min(x, area.right() - self.width() - 8))
-        y = max(area.top() + 8, min(y, area.bottom() - self.height() - 8))
+        x = max(area.left() + 8, min(self.x(), area.right() - self.width() - 8))
+        y = max(area.top() + 8, min(self.y(), area.bottom() - self.height() - 8))
         self.move(x, y)
 
     # -- expand/collapse ----------------------------------------------------
@@ -227,10 +304,7 @@ class FloatingAssistant(QWidget):
         self.setFixedSize(COLLAPSED, COLLAPSED)
 
     def toggle(self):
-        if self._expanded:
-            self.collapse()
-        else:
-            self.expand()
+        self.collapse() if self._expanded else self.expand()
 
     # -- actions ------------------------------------------------------------
     def _analyze(self):
@@ -251,16 +325,31 @@ class FloatingAssistant(QWidget):
         except (RuntimeError, AttributeError):
             return
 
+    def _toggle_favorite(self):
+        try:
+            self.host.toggle_favorite_contact()
+        except (RuntimeError, AttributeError):
+            return
+        self.refresh()
+
     def show_main(self):
         self.show_main_settings()
 
     def show_main_settings(self):
-        # Keep the ball visible (collapsed) while the settings/history main window
-        # is open; only the chat page is gone in ball mode.
         self.collapse()
         try:
             self.host.show()
             self.host.show_settings()
+            self.host.raise_()
+            self.host.activateWindow()
+        except RuntimeError:
+            pass
+
+    def show_main_history(self):
+        self.collapse()
+        try:
+            self.host.show()
+            self.host.show_history()
             self.host.raise_()
             self.host.activateWindow()
         except RuntimeError:
@@ -272,7 +361,7 @@ class FloatingAssistant(QWidget):
             self.host.config["floating_ball"] = False
             from . import settings
             settings.save(self.host.config)
-        except Exception:  # noqa: BLE001 - best-effort while exiting
+        except Exception:  # noqa: BLE001 - best effort while exiting
             pass
         self.hide()
         try:
