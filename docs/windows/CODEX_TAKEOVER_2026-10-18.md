@@ -155,3 +155,7 @@ assert item["status"] == "visible", f"微信窗口不是 visible: {item['status'
   - 证据：`docs/windows/CODEX_TAKEOVER_C5_SYNTHETIC.md`、`windows/lite/tools/c5_synthetic_evidence.py`
   - 未覆盖：真实模型额度/真实双账号/真实 UI 点击/真实托盘，仍待用户或 C1/C3。
 - C1/C2/C3/C4 进行中；真实窗口时段 C4 → 10:35、C3 10:35–10:55、C1 10:55–11:20（均需 preflight visible）。
+## 接管进展补充（2026-10-18 10:47）
+
+- **C2 已完成（隔离升级验证）**：0.4.3（5cafa1a）→0.5.8（a3b2994），26/26 步 ok；安装/覆盖升级/默认卸载保留数据/重装读取恢复全部 exit 0；真实 profile before==after、E:\ChatAssistantLite 与 0.5.7 注册表/进程未动；V2→V2（migrated=false）如实记录。差距：test-only AppId、0.4.x 为 git 历史重建、非干净 VM、正式 AppId 升级待 Codex/VM。证据 `docs/windows/CODEX_TAKEOVER_C2_UPGRADE.md`。
+- C4 完成、C5 完成并同步 Codex 面板；C1 真实 UI 4 次驱动失败（未证伪产品，待 Codex/用户复验，不标完成）；C3 首跑被误杀，正在重跑。
