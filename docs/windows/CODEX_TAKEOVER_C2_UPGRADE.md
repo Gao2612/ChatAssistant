@@ -128,3 +128,37 @@ G:\codex\wechat-lite-venv\Scripts\python.exe tools\c2_upgrade_verify.py `
 | `windows/lite/test-output/c2-upgrade-evidence/lifecycle-summary.txt` | 本报告 §5/§6 的机器摘要（`c2_evidence_summary.py` 输出） |
 | `windows/lite/test-output/c2-upgrade-evidence/setups-sha256.txt` | 两个 test 安装包 SHA-256 |
 | `windows/lite/test-output/c2-upgrade-evidence/isolated-settings.json` / `isolated-memory.sqlite3` | 卸载后保留的合成 profile 实体（无真实数据） |
+
+## 10. 复核问答清单（history / Codex 可能追问的日志与步骤）
+
+> 证据已冻结：以下答案均指向已保存的 JSON/日志，不需要重跑；复核时若需看原始日志，路径见 §9。
+
+**Q1：为什么最初 `install-old-0.4.3` 是 exit 1，后来如何证明不是数据/安装包问题？**
+A：第一次失败时没有 `/LOG` 且 tail 为空；抓到 Inno 日志/手动对照后定位为**启动方式**——用 Python `subprocess` 参数列表启动 Inno 时，`/DIR="..."` 被转义成 `/DIR=\"...\"`，Inno 解析失败并静默 exit 1、不写 `/LOG`。改为 `cmd.exe /c "<setup>" /VERYSILENT ... /LOG="..."` 原生命令行后，`inno-install-old.log` 末尾为 `Installation process succeeded / Need to restart Windows? No`，exit=0，且 0.4.3 `--version-json=0.4.3`、`--smoke=0`。证据：`evidence/logs/install-old.log`、`inno-install-old.log`、result JSON 的 `install-old-0.4.3`/`installed-old-version-json` 步骤。
+
+**Q2：怎么证明测试没有碰真实 profile / 真实安装 / 注册表？**
+A：1) driver 快照真实 `C:\Users\16356\AppData\Local\ChatAssistantLite` 的文件列表/大小/`settings.json`+`memory.sqlite3` SHA-256，运行后 `before == after`，JSON `isolation.real_profile_unchanged=true`；2) 所有 app/probe 子进程的 `LOCALAPPDATA` 被强制为 `work\isolated-localappdata`，probe 校验路径精确匹配并拒绝真实 profile；3) 测试安装包 AppId 是 `C2TAKEOVER-...`、AppName “C2 Test”、无快捷方式，`CloseApplications=no`，不与真实 `{AC7EB68E…}` 键冲突；4) 运行前后每轮只清理含 `C2TAKEOVER` 的 HKCU 项，真实 `{AC7EB68E…}_is1`/`E:\ChatAssistantLite`/3 个运行实例保留；5) 最终无测试卸载键残留。证据：JSON 的 `isolation`、`cleanup-stale-test-registration`、`real-profile-untouched`，以及 report §7.6。
+
+**Q3：`from_version`/`migrated` 为什么是 2/2/false？是否有旧 schema 没覆盖？**
+A：0.4.3 commit `5cafa1a` 的 `history_models.SCHEMA_VERSION` 已经是 **2**；本次是 0.4.3(V2) → 0.5.8(V2) 的读取/兼容验证，所以 `from_version=2, to_version=2, migrated=false, created=false` 是正确结果，不是漏测。旧版代码身份也记录在 probe 结果 `code: {package_root, app_version=0.4.3, history_schema_version=2}`；0.2/0.3 V1→V2 由 T5 迁移测试覆盖，不在 C2 场景。
+
+**Q4：卸载默认保留数据怎么证明？除了文件存在还有更强证据吗？**
+A：卸载前后对隔离 profile 做完整快照：4 个文件、`settings.json`（3,693 B，SHA-256 `f20eaa0b…4e9613b`）与 `memory.sqlite3`（86,016 B，SHA-256 `ba0e94fd…ac8b3f935`）**字节级一致**；卸载后立即用 0.5.8 probe 重新读取，Key/授权/历史 0 mismatches。Inno 日志 `Uninstallation process succeeded / Removed all? Yes`。证据：result JSON `uninstall-keeps-data-dir`（before/after 快照）、`data-readable-after-uninstall`、`inno-uninstall-after-upgrade.log`。
+
+**Q5：重装后怎么证明“恢复”而不是新建了空 profile？**
+A：重装后 0.5.8 `--version-json=0.5.8`、`--smoke=0`，然后用同一 0.5.8 代码 probe 读取**同一个隔离 profile**：`host_id`、Key 摘要、ChatGPT `subject/client_id/email`、模型目录、历史 record_count=4/char_count=113/source_version=2/memory_version=2/derived_memory=1/文本摘要全部匹配，0 mismatches（若是空 profile 这些都会缺失）。证据：`reinstall-new-0.5.8`、`reinstalled-app-reads-preserved-data` 步骤与 `inno-install-reinstall.log`。
+
+**Q6：为什么 result JSON 里 `uninstall-default` 的 `install_dir_removed=false`？**
+A：Inno 卸载后主 exe 已删除（`main_exe_removed=true`），但安装目录本身在本次测试里仍保留为空目录/少量卸载自身残留（未做递归清理），这不影响“程序文件移除、数据目录保留”的结论；证据 `dir_contents` 与最终复查安装目录为空。
+
+**Q7：脚本/工具在哪里、是否改过 liteapp 业务源码或仓库 dist-release？**
+A：新增 `windows/lite/tools/c2_upgrade_verify.py`、`windows/lite/tools/c2_profile_probe.py`，证据在 `windows/lite/test-output/`；**未改 `liteapp/` 任何业务文件**，未写/删仓库 `windows/lite/dist-release/`，未 commit/push。测试安装包仅存在于隔离 work dir（`G:\codex\c2-takeover-work\`，仓库外）。
+
+**Q8：目前没有验证、需要在真实 VM 上补测的是什么？**
+A：真实正式 AppId 的 Inno 覆盖升级（注册表/uninstaller 替换）、原发布 0.4.x 二进制安装包的首跑 profile、干净 Windows 10/11 VM/标准用户、升级中断/回滚/旧程序拒写新库；本证据的资格是“隔离重建包 + 源级数据升级已验证”，不能写成“真实安装包升级已通过”。
+
+**Q9：开始菜单快捷方式副作用是什么、如何恢复？**
+A：早期一次未隔离 test installer 试验替换/删除了本机开始菜单 `ChatAssistant Lite.lnk`；真实安装目录、卸载键与进程完好、无用户数据影响。**后续真实 0.5.8/0.5.9 安装会重新创建该快捷方式**；正式安装前如需要也可重装/重建候选包恢复。已记录于 §7.6，不需要额外修复动作。
+
+**Q10：最终判定/计数是什么？**
+A：隔离 test-AppId 环境 26/26 步 ok（`ok=true`），其中真实安装链：install 0.4.3 exit 0 → upgrade 0.5.8 exit 0 → uninstall exit 0 + 数据保留 → reinstall exit 0 + 读取恢复；`real_profile_unchanged=true`；V2→V2。脚本可重复：`c2_upgrade_verify.py --help`，默认提交/版本为 0.4.3 `5cafa1a` → 0.5.8 `a3b2994`。完整命令见 §5。
