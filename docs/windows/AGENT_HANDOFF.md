@@ -19,7 +19,7 @@ Windows 开发基础已增加 [crush 源码参考包](../../windows/reference/cr
 3. [原始详细产品设想](WINDOWS_WECHAT_PRODUCT_PLAN.md)（含已后移的嵌入和历史分析方向）
    - 必读：[最新实机测试结果与复现](WECHAT_EMBED_TEST_RESULTS_2026-10-14.md)
    - 源码：[窗口嵌入探针](../../windows/probes/wechat-embed/README.md)
-4. 现有 [Android 项目说明](../../README.md)，注意平台区别。
+4. 现有 [Windows 项目说明](../../README.md)。
 
 ## 已确认需求
 - 当前需求包含官方微信聊天在中央可见且可交互、实时自动判断、右侧不压缩主视图的建议栏，以及按联系人导入历史文件。本版采用不修改父级与窗口样式的原生顶层停靠，停靠失败显示只读镜像；已验证鼠标命中原生微信窗口，完整交互仍需逐项验证。

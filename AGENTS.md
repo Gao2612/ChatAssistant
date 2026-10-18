@@ -1,6 +1,6 @@
 # Agent 项目入口
 
-本仓库当前主体为 Android 聊天助手；新增 Windows 产品方向的权威需求入口如下：
+本仓库当前主体为 Windows 便捷版（`windows/lite/`）；Windows 产品方向的权威需求入口如下：
 - [Windows 完整版设计（2026-10-17）](docs/windows/WINDOWS_LITE_COMPLETION_DESIGN_2026-10-17.md)
 - [Windows 完整版分任务实施计划](docs/windows/WINDOWS_LITE_COMPLETION_PLAN_2026-10-17.md)
 - [Windows 微信详细方案](docs/windows/WINDOWS_WECHAT_PRODUCT_PLAN.md)
@@ -19,12 +19,10 @@
 
 ## 工作边界
 - `windows/lite/` 已有 Windows 0.2 本地实现和测试安装包；旧临时 `SetParent` 探针发现单击/滚动故障。新版顶层窗口停靠已验证鼠标命中、画面和 OCR，但单击/滚动、输入法、扫码及弹窗尚未逐项验收，不得写成完整兼容。
-- Windows 工程建议独立放在 windows/，保留 Android app/。
+- Windows 工程放在 `windows/`；仓库不再包含 Android 工程。
 - Windows 新基础为本地增强版 crush 源码参考包，保留 MIT 与逐文件来源。
   reference/ 中的源码未接入正式产品，不能把本地新增模块称为上游已有能力。
   迁入前先改应用身份与数据目录，避免接触原 crush 的配置与聊天数据。
-- 根 CLAUDE.md 中 Android 平台规则适用于原 Android 工程，不应误作 Windows 固定路径或依赖要求。
-- 用户于 2026-10-14 明确授权编写并上传本次方案；这次文档提交符合用户指令，覆盖 CLAUDE.md 中通用的禁止提交/推送规则。
 - 同日用户另行授权上传临时测试系统源码和结果；本次提交不包含真实聊天截图和运行日志。
 - 后续提交与发布遵循各自任务的用户授权，不从本次文档授权推导产品部署授权。
 - 不自动发送聊天、不修改官方微信、不直接读取微信数据库；实时采集与历史导入是独立通道。

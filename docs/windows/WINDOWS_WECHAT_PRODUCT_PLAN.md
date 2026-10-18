@@ -25,20 +25,20 @@
 
 ## 2. 仓库现状与证据
 
-Gao2612/ChatAssistant 当前为 Android Kotlin + View/XML 工程：
-- app/build.gradle.kts 使用 com.android.application，compileSdk 35、minSdk 30。
-- capture/ChatAppAdapter.kt 依赖 Android AccessibilityNodeInfo，按平台解析当前可见对话。
-- README 描述无障碍读屏、OCR 兜底、模型判断与回复建议；桌面版不是本工程已实现的功能。
+Gao2612/ChatAssistant 原为 Android Kotlin + View/XML 工程（Android 工程已从仓库移除）：
+- 原 Android 工程使用 com.android.application，compileSdk 35、minSdk 30。
+- 原 ChatAppAdapter 依赖 Android AccessibilityNodeInfo，按平台解析当前可见对话。
+- 当时的 README 描述无障碍读屏、OCR 兜底、模型判断与回复建议；桌面版不是当时工程已实现的功能。
 
 因此不能通过简单更换打包器生成原生 Windows 版本。
 Windows 桌面壳和历史分析改以 crush 的 Electron/TypeScript 源码为开发基础。
-原有 Android 代码提供实时流程和采集适配器的设计参考。
+原 Android 工程已从仓库移除，其设计曾为实时流程和采集适配器提供参考。
 参考包保留上游 MIT 许可、基础提交及每个文件的哈希和本地改动状态。
 它仍使用 crush 的应用身份、配置路径和两人分析模型，迁入时需要明确适配。
-README 链接的 Windows 姊妹项目 https://github.com/jev-chat/jev-chat-windows 值得作为参考或复用基础：
+当时 README 链接的 Windows 姊妹项目 https://github.com/jev-chat/jev-chat-windows 值得作为参考或复用基础：
 - Python + PySide6 UI，Windows Graphics Capture + RapidOCR 本地采集。
 - main.py 管理采集子进程、模型调用和会话上下文。
-- app/capture.py 的 find_chat_hwnd 返回一个聊天窗口；目前不能据此认为已支持多账号。
+- 上游 `jev-chat/jev-chat-windows` 的 `app/capture.py` 中 find_chat_hwnd 返回一个聊天窗口；目前不能据此认为已支持多账号。
 - main.py 的 chats 按标题索引，Windows 产品必须增加账号维度和稳定会话标识。
 - jev.spec 为 PyInstaller onedir 打包，需要再增加安装器才能形成安装流程。
 - 项目 NOTICE 列出了组件授权要求。复用时保留出处，逐项确认依赖许可，不能把项目 MIT 等同于所有依赖许可。
@@ -46,8 +46,7 @@ README 链接的 Windows 姊妹项目 https://github.com/jev-chat/jev-chat-windo
 本次只进行了远程源码检查，未启动软件、测试 OCR、验证微信嵌入或解析实际 ExportWeChat 样本。
 事实来源：
 - https://github.com/Gao2612/ChatAssistant/blob/main/README.md
-- https://github.com/Gao2612/ChatAssistant/blob/main/app/build.gradle.kts
-- https://github.com/Gao2612/ChatAssistant/blob/main/app/src/main/java/com/jev/probe/capture/ChatAppAdapter.kt
+- 原 Android 工程已从仓库移除，其历史实现文件不再保留在 main 分支。
 - https://github.com/jev-chat/jev-chat-windows/blob/main/main.py
 - https://github.com/jev-chat/jev-chat-windows/blob/main/app/capture.py
 - https://github.com/jev-chat/jev-chat-windows/blob/main/jev.spec
@@ -91,7 +90,7 @@ README 链接的 Windows 姊妹项目 https://github.com/jev-chat/jev-chat-windo
 Windows 原生窗口、WGC 与 OCR 能力通过独立连接器接入；
 是否需要 Python 或其它原生进程由采集验证结果决定，不预先要求改写分析模块。
 crush 便携打包只作为构建基础，正式产品仍需安装、升级与卸载设计。
-推荐新增独立 windows/ 工程，保留现有 Android app/ 构建，不在 Android 源码中硬塞桌面逻辑。
+推荐新增独立 `windows/` 工程，不在 Android 源码中硬塞桌面逻辑；原 Android 工程现已从仓库移除。
 
 模块：
 - DesktopShell：工作台、任务页、资料页、设置和状态展示。

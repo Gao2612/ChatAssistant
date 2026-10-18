@@ -8,7 +8,7 @@
 
 ## 1. 首版决策
 
-采用 Python + PySide6 独立程序，保留现有模块和 Android 主体。官方微信由用户手动启动和登录；助手根据用户配置的完整 exe 路径发现窗口，唯一候选可自动连接，多个候选由用户选择。默认微信独立、助手放在旁边，不再修改微信父窗口、样式或焦点。现有“启动微信”按钮仅作为用户主动操作的可选快捷入口。
+采用 Python + PySide6 独立程序，保留现有模块；仓库主体已迁移到 `windows/`。官方微信由用户手动启动和登录；助手根据用户配置的完整 exe 路径发现窗口，唯一候选可自动连接，多个候选由用户选择。默认微信独立、助手放在旁边，不再修改微信父窗口、样式或焦点。现有“启动微信”按钮仅作为用户主动操作的可选快捷入口。
 
 一次只采集一个活动窗口。每次得到的是完整的当前可见文字快照，不累积聊天历史，不按联系人名称合并记录；截图和实时聊天只在助手内存中。提供暂停校正、手动粘贴、可能意图/需求/建议动作/不确定性及三条可复制回复。发送始终由用户完成。
 
@@ -170,6 +170,6 @@ OpenAI 的账户与会话文档进一步说明：Plus 的五小时额度由所�
 
 订阅后端方案按 OpenAI Developers 官方 [Sign in with ChatGPT 概览](https://developers.openai.com/siwc/token-sharing-open-source)、[注册与登录](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)、[模型和推理](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference)、[账户、会话和用量](https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions) 及 [预览限制](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations) 整理。官方将 ChatGPT plan usage 定位为开源和本地托管应用的可选能力；商业/远程托管应用需另行联系 OpenAI。
 
-已阅读根 `AGENTS.md`、`CLAUDE.md`、Android `docs/v1.3-plan.md` 的适用边界、Windows 详细方案、交接文档、嵌入实机报告、便捷版计划及 `windows/lite/` 当前代码。上游引用固定为 `jev-chat/jev-chat-windows` 提供的提交 `c6d3a10474ce1ff3b7f8f6402b3b5e0e58fad5f1`；当前 vendor 仅用于本地 OCR/定位，发布仍需来源说明和依赖许可清单。
+已阅读根 `AGENTS.md` 的适用边界、Windows 详细方案、交接文档、嵌入实机报告、便捷版计划及 `windows/lite/` 当前代码。上游引用固定为 `jev-chat/jev-chat-windows` 提供的提交 `c6d3a10474ce1ff3b7f8f6402b3b5e0e58fad5f1`；当前 vendor 仅用于本地 OCR/定位，发布仍需来源说明和依赖许可清单。
 
 本轮在允许本机环回假服务的环境运行 `python -B -m unittest discover -s tests -v`：27 项通过；`compileall` 和 Qt offscreen `main.py --smoke` 通过。PyInstaller 应用和最小 Qt 示例都在导入 `QtWidgets` 时失败；Nuitka standalone 构建目前要求本机 MSVC + Windows SDK，当前机器没有 `cl.exe`，自动下载的 MinGW 缺少 `psdk_inc/intrin-impl.h`。真实微信采集、离线 OCR、远端模型请求、SIWC 浏览器授权及独立打包尚未验证。产品代码和文档仍在本地分支，当前改动尚未提交。
