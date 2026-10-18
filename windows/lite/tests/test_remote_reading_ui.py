@@ -19,6 +19,7 @@ BASE_CONFIG = {
     "wechat_path": "", "backend": "api", "base_url": "https://example.test/v1",
     "model": "test-model", "api_model": "test-model", "api_key": "synthetic",
     "auto_connect": False, "auto_analysis": True, "subscription": None,
+    "favorite_contacts": ["OCR 会话"],
     "subscription_models": [], "reading_backend": "api",
     "reading_base_url": "https://vision.example.test/v1", "reading_model": "vision-model",
     "reading_api_key": "synthetic-reading", "codex_path": "", "style": "自然",

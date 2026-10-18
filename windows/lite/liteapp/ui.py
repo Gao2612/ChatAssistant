@@ -997,7 +997,7 @@ class MainWindow(QMainWindow):
     def __init__(self, config=None, scanning=True, window_manager=None, account_store=None,
                  inference_queue=None):
         super().__init__()
-        self.setWindowTitle("微信实时助手 · 便捷版 0.5.14")
+        self.setWindowTitle("微信实时助手 · 便捷版 0.5.15")
         self.resize(1000, 520)
         self.setMinimumSize(900, 500)
         self.setStyleSheet(STYLE)
@@ -2028,9 +2028,9 @@ class MainWindow(QMainWindow):
             self.user_paused = True
             self.set_connection_status("采集进程已停止，请在设置中重新连接。")
         favorites = self.config.get("favorite_contacts") or []
-        # Backward compatible: before the user fixes any contact, every contact may
-        # auto-analyse as before. Once at least one is fixed, only fixed contacts do.
-        favorite = (not favorites) or self.is_favorite_contact(self.state.title)
+        # Only fixed contacts auto-analyse. Before the user fixes anyone the list is
+        # empty, so everything requires the explicit 分析当前对话 button.
+        favorite = bool(favorites) and self.is_favorite_contact(self.state.title)
         if self.auto_analysis.isChecked() and self.state.ready:
             if not favorite:
                 self.analysis_status.setText("非固定联系人：点“分析当前对话”确认")

@@ -67,6 +67,7 @@ class AutoPipelineTests(unittest.TestCase):
             'wechat_path': '', 'backend': 'api', 'base_url': 'https://example.test/v1',
             'model': 'test', 'api_model': 'test', 'api_key': 'synthetic',
             'auto_connect': False, 'auto_analysis': True, 'subscription_models': [],
+            'favorite_contacts': ['测试客户'],
         }, scanning=False)
         self.window.poll.stop()
         self.window.dock_timer.stop()
